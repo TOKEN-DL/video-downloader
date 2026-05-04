@@ -39,6 +39,11 @@ export function getDownloadUrl(taskId) {
   return `${BASE}/api/download/file/${taskId}`
 }
 
+export function proxyImageUrl(url) {
+  if (!url) return ''
+  return `${BASE}/api/proxy/image?${new URLSearchParams({ url })}`
+}
+
 export function formatFileSize(bytes) {
   if (!bytes) return ''
   if (bytes < 1024) return bytes + 'B'

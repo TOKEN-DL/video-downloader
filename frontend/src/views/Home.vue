@@ -1,7 +1,7 @@
 <script setup>
 import { ref } from 'vue'
 import { useDownload } from '../composables/useDownload'
-import { formatFileSize, formatDuration } from '../api'
+import { formatFileSize, formatDuration, proxyImageUrl } from '../api'
 
 const {
   url, loading, error, videoInfo, selectedFormat,
@@ -145,36 +145,41 @@ function handlePaste(e) {
     <transition name="slide">
       <section v-if="videoInfo" class="max-w-2xl mx-auto w-full px-6 pb-12">
         <div class="animate-scale-in bg-white rounded-3xl shadow-lg border border-gray-100 overflow-hidden">
-          <!-- Video Info Header -->
-          <div class="p-5 md:p-6 flex gap-4">
-            <div v-if="videoInfo.thumbnail" class="relative flex-shrink-0">
-              <img
-                :src="videoInfo.thumbnail"
-                alt=""
-                class="w-32 md:w-44 h-20 md:h-[104px] object-cover rounded-xl bg-gray-100"
-                @error="($event.target).style.display = 'none'"
-              />
-              <!-- Duration badge -->
-              <div v-if="videoInfo.duration" class="absolute bottom-1.5 right-1.5 bg-black/70 text-white text-[10px] px-1.5 py-0.5 rounded-md">
-                {{ formatDuration(videoInfo.duration) }}
-              </div>
+
+          <!-- Cover Image Banner -->
+          <div class="relative w-full aspect-video bg-gray-100 overflow-hidden">
+            <img
+              v-if="videoInfo.thumbnail"
+              :src="proxyImageUrl(videoInfo.thumbnail)"
+              alt=""
+              class="w-full h-full object-cover"
+              @error="($event.target).style.display = 'none'"
+            />
+            <!-- Gradient overlay -->
+            <div class="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent"></div>
+
+            <!-- Duration badge (bottom-right) -->
+            <div v-if="videoInfo.duration"
+                 class="absolute bottom-3 right-3 bg-black/70 text-white text-xs px-2 py-1 rounded-lg backdrop-blur-sm">
+              {{ formatDuration(videoInfo.duration) }}
             </div>
-            <div class="min-w-0 flex-1">
-              <h3 class="text-[#1d1d1f] font-semibold text-base md:text-lg leading-snug mb-1.5 line-clamp-2">
+
+            <!-- Platform badge (top-left) -->
+            <div v-if="videoInfo.platform"
+                 class="absolute top-3 left-3 bg-black/50 text-white text-[10px] px-2.5 py-1 rounded-full font-medium uppercase tracking-wider backdrop-blur-sm">
+              {{ videoInfo.platform }}
+            </div>
+
+            <!-- Video title overlay (bottom) -->
+            <div class="absolute bottom-0 left-0 right-0 p-4 md:p-5">
+              <h3 class="text-white font-semibold text-base md:text-lg leading-snug line-clamp-2 drop-shadow-md">
                 {{ videoInfo.title }}
               </h3>
-              <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-[#86868b] text-xs md:text-sm">
-                <span v-if="videoInfo.author">{{ videoInfo.author }}</span>
-                <span v-if="videoInfo.platform"
-                      class="inline-flex items-center px-2 py-0.5 bg-[#f5f5f7] rounded-full text-[10px] font-medium text-[#86868b] uppercase tracking-wide">
-                  {{ videoInfo.platform }}
-                </span>
-              </div>
+              <p v-if="videoInfo.author" class="text-white/70 text-xs md:text-sm mt-1 drop-shadow-sm">
+                {{ videoInfo.author }}
+              </p>
             </div>
           </div>
-
-          <!-- Divider -->
-          <div class="h-px bg-gray-100 mx-5 md:mx-6"></div>
 
           <!-- Quality Selector -->
           <div class="p-5 md:p-6">

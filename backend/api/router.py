@@ -1,6 +1,8 @@
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from services.video_service import parse_video, start_download, get_status, get_filepath
+import httpx
 
 router = APIRouter()
 
@@ -60,3 +62,24 @@ async def api_download_file(task_id: str):
         media_type="video/mp4",
         filename=filename,
     )
+
+
+@router.get("/api/proxy/image")
+async def api_proxy_image(url: str):
+    if not url:
+        raise HTTPException(status_code=400, detail="url参数不能为空")
+    try:
+        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+            resp = await client.get(
+                url,
+                headers={"Referer": url, "User-Agent": "Mozilla/5.0"},
+            )
+            resp.raise_for_status()
+        content_type = resp.headers.get("content-type", "image/jpeg")
+        return StreamingResponse(
+            iter([resp.content]),
+            media_type=content_type,
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"图片获取失败: {str(e)}")

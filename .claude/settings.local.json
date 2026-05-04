@@ -15,7 +15,14 @@
       "Bash(npm install *)",
       "Bash(python -c ' *)",
       "Bash(curl -s -X POST http://127.0.0.1:5174/api/parse -H \"Content-Type: application/json\" -d '{\"url\":\"https://www.bilibili.com/video/BV1GJ411x7h7\"}')",
-      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(f'OK - {d[\\\\\"title\\\\\"][:30]}'\\)\")"
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(f'OK - {d[\\\\\"title\\\\\"][:30]}'\\)\")",
+      "Bash(awk '{print $5}')",
+      "Bash(read pid *)",
+      "Bash(cmd.exe /c 'taskkill /F /PID __TRACKED_VAR__ /T')",
+      "Bash(python -m uvicorn main:app --host 127.0.0.1 --port 8002)",
+      "Bash(curl -s -o /dev/null -w 'HTTP %{http_code}, Size: %{size_download} bytes, Type: %{content_type}' 'http://127.0.0.1:8002/api/proxy/image?url=http://i1.hdslb.com/bfs/archive/5242750857121e05146d5d5b13a47a2a6dd36e98.jpg')",
+      "Bash(python -m uvicorn main:app --host 127.0.0.1 --port 8003)",
+      "Bash(curl -s -o /dev/null -w 'HTTP %{http_code}, Size: %{size_download} bytes, Type: %{content_type}' 'http://127.0.0.1:8003/api/proxy/image?url=http://i1.hdslb.com/bfs/archive/5242750857121e05146d5d5b13a47a2a6dd36e98.jpg')"
     ]
   }
 }
