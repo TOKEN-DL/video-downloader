@@ -1,6 +1,7 @@
 import os
 import uuid
 import logging
+import asyncio
 import threading
 from typing import Optional
 from yt_dlp import YoutubeDL
@@ -18,7 +19,43 @@ def _build_opts() -> dict:
     return opts
 
 
+def _run_async_in_thread(coro):
+    """Run an async coroutine in a separate thread to avoid event loop conflicts."""
+    result = [None]
+    exc = [None]
+
+    def _target():
+        loop = asyncio.new_event_loop()
+        try:
+            result[0] = loop.run_until_complete(coro)
+        except Exception as e:
+            exc[0] = e
+        finally:
+            loop.close()
+
+    t = threading.Thread(target=_target)
+    t.start()
+    t.join()
+    if exc[0]:
+        raise exc[0]
+    return result[0]
+
+
 def parse_video(url: str) -> dict:
+    try:
+        return _parse_with_ytdlp(url)
+    except Exception as e:
+        err_msg = str(e)
+        if "Fresh cookies" in err_msg or "Douyin" in err_msg or "douyin" in err_msg.lower():
+            logger.warning(f"yt-dlp failed for Douyin-like URL, trying local parser: {err_msg}")
+            from services.douyin_service import parse_video as douyin_parse
+            result = douyin_parse(url)
+            if result:
+                return result
+        raise
+
+
+def _parse_with_ytdlp(url: str) -> dict:
     opts = _build_opts()
     with YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=False)
@@ -169,6 +206,67 @@ def start_download(url: str, format_id: str) -> str:
     task_id = uuid.uuid4().hex[:12]
     output_path = os.path.join(config.DOWNLOAD_DIR, f"{task_id}.mp4")
     t = threading.Thread(target=_download_worker, args=(url, format_id, task_id, output_path), daemon=True)
+    t.start()
+    return task_id
+
+
+def _fallback_download_worker(video_url: str, task_id: str, output_path: str):
+    task_progress[task_id] = {
+        "status": "downloading",
+        "progress": 0,
+        "speed": None,
+        "downloaded": 0,
+        "total": None,
+        "eta": None,
+        "filepath": None,
+    }
+
+    import time
+    import httpx
+
+    async def _do_download():
+        start_time = time.time()
+        async with httpx.AsyncClient(timeout=120, follow_redirects=True) as client:
+            async with client.stream("GET", video_url, headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Referer": "https://www.douyin.com/",
+            }) as resp:
+                resp.raise_for_status()
+                total = int(resp.headers.get("content-length", 0))
+                downloaded = 0
+                with open(output_path, "wb") as f:
+                    async for chunk in resp.aiter_bytes(chunk_size=65536):
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        elapsed = time.time() - start_time
+                        speed = downloaded / elapsed if elapsed > 0 else 0
+                        task_progress[task_id].update({
+                            "status": "downloading",
+                            "progress": round(downloaded / total * 100, 1) if total else None,
+                            "downloaded": downloaded,
+                            "total": total if total > 0 else None,
+                            "speed": f"{speed / 1024 / 1024:.1f}MB/s" if speed else None,
+                        })
+
+    try:
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(_do_download())
+        finally:
+            loop.close()
+        task_progress[task_id]["status"] = "done"
+        task_progress[task_id]["filepath"] = output_path
+        logger.info(f"[{task_id}] Fallback download complete: {output_path}")
+    except Exception as e:
+        logger.error(f"[{task_id}] Fallback download failed: {e}")
+        task_progress[task_id]["status"] = "error"
+        task_progress[task_id]["error"] = str(e)
+
+
+def start_fallback_download(video_url: str) -> str:
+    task_id = uuid.uuid4().hex[:12]
+    output_path = os.path.join(config.DOWNLOAD_DIR, f"{task_id}.mp4")
+    t = threading.Thread(target=_fallback_download_worker, args=(video_url, task_id, output_path), daemon=True)
     t.start()
     return task_id
 

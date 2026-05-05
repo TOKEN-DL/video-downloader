@@ -1,10 +1,14 @@
+import asyncio
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel
-from services.video_service import parse_video, start_download, get_status, get_filepath
+from services.video_service import parse_video, start_download, start_fallback_download, get_status, get_filepath
 import httpx
 
 router = APIRouter()
+
+# Cache parsed video info for fallback downloads
+_parsed_cache: dict = {}
 
 
 class ParseRequest(BaseModel):
@@ -21,7 +25,9 @@ async def api_parse(req: ParseRequest):
     if not req.url.strip():
         raise HTTPException(status_code=400, detail="URL不能为空")
     try:
-        result = parse_video(req.url)
+        result = await asyncio.to_thread(parse_video, req.url)
+        if result.get("_fallback"):
+            _parsed_cache[req.url] = result
         return result
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"解析失败: {str(e)}")
@@ -29,11 +35,26 @@ async def api_parse(req: ParseRequest):
 
 @router.post("/api/download")
 async def api_download(req: DownloadRequest):
-    if not req.url.strip() or not req.format_id.strip():
-        raise HTTPException(status_code=400, detail="URL和格式ID不能为空")
+    if not req.url.strip():
+        raise HTTPException(status_code=400, detail="URL不能为空")
+
     try:
+        # Check if this is a fallback (Evil0ctal) parse result
+        cached = _parsed_cache.get(req.url)
+        if cached and cached.get("_fallback"):
+            video_url = cached.get("_video_url", "")
+            if not video_url:
+                raise HTTPException(status_code=400, detail="无可用下载链接")
+            task_id = start_fallback_download(video_url)
+            return {"task_id": task_id}
+
+        # Normal yt-dlp download
+        if not req.format_id.strip():
+            raise HTTPException(status_code=400, detail="format_id不能为空")
         task_id = start_download(req.url, req.format_id)
         return {"task_id": task_id}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"下载启动失败: {str(e)}")
 
@@ -49,7 +70,6 @@ async def api_download_status(task_id: str):
 
 @router.get("/api/download/file/{task_id}")
 async def api_download_file(task_id: str):
-    from fastapi.responses import FileResponse
     import os
 
     filepath = get_filepath(task_id)

@@ -30,6 +30,7 @@ def _find_ffmpeg():
 
 FFMPEG_PATH = _find_ffmpeg()
 
+
 MAX_CONCURRENT_DOWNLOADS = 5
 FILE_CLEANUP_SECONDS = 3600
 MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024  # 2GB
