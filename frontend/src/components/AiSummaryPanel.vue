@@ -1,5 +1,5 @@
 <template>
-  <div class="bg-white rounded-2xl border border-gray-100 shadow-lg overflow-hidden">
+  <div class="bg-white rounded-2xl border border-gray-100 shadow-lg overflow-hidden h-full flex flex-col">
     <!-- Tab 导航 -->
     <div class="flex border-b border-gray-100">
       <button
@@ -16,15 +16,17 @@
     </div>
 
     <!-- 内容区域 -->
-    <div class="p-5 sm:p-6 min-h-[300px]">
+    <div class="p-5 sm:p-6 flex-1 min-h-[400px]">
 
       <!-- ===== 总结 Tab ===== -->
-      <div v-show="activeTab === 'summary'">
+      <div v-show="activeTab === 'summary'" class="h-full flex flex-col">
         <div v-if="loading && !summaryHtml" class="flex flex-col items-center justify-center py-16">
           <div class="w-10 h-10 border-4 border-[#0071e3]/20 border-t-[#0071e3] rounded-full animate-spin mb-4"></div>
           <p class="text-[#86868b] text-sm">{{ statusMessage }}</p>
         </div>
-        <div v-if="summaryHtml" class="summary-prose prose prose-slate prose-sm max-w-none" v-html="summaryHtml"></div>
+        <div v-if="summaryHtml" class="flex-1 overflow-y-auto max-h-[600px] pr-1">
+          <div class="summary-prose prose prose-slate prose-sm max-w-none" v-html="summaryHtml"></div>
+        </div>
         <div v-if="loading && summaryHtml" class="mt-2 inline-flex items-center gap-1.5 text-xs text-[#86868b]">
           <span class="w-1.5 h-1.5 bg-[#0071e3] rounded-full animate-pulse"></span>
           AI 正在生成中...

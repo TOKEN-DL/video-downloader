@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { useDownload } from '../composables/useDownload'
 import { useSummarize } from '../composables/useSummarize'
 import { formatFileSize, formatDuration, proxyImageUrl } from '../api'
@@ -9,7 +9,7 @@ const {
   url, loading, error, videoInfo, selectedFormat,
   status, progress, speed, downloaded, total, eta, fileUrl,
   canParse, canDownload, isDone, isDownloading,
-  parse, download, reset,
+  parse, download, reset: resetDownload,
 } = useDownload()
 
 const {
@@ -20,7 +20,6 @@ const {
   start: startSummarize, chat, reset: resetSummary,
 } = useSummarize()
 
-const showAiPanel = ref(false)
 const menuOpen = ref(false)
 
 function handleKeydown(e) {
@@ -37,6 +36,18 @@ function handlePaste(e) {
     }, 100)
   }
 }
+
+// 解析成功后自动触发 AI 总结
+watch(videoInfo, (info) => {
+  if (info && url.value) {
+    startSummarize(url.value)
+  }
+})
+
+function handleReset() {
+  resetDownload()
+  resetSummary()
+}
 </script>
 
 <template>
@@ -44,7 +55,7 @@ function handlePaste(e) {
 
     <!-- ═══ Navbar ═══ -->
     <nav class="sticky top-0 z-50 glass-card">
-      <div class="max-w-[980px] mx-auto px-6 h-11 flex items-center justify-between">
+      <div class="max-w-[1200px] mx-auto px-6 h-11 flex items-center justify-between">
         <!-- Logo -->
         <router-link to="/" class="flex items-center gap-2 group">
           <div class="w-7 h-7 bg-[#0071e3] rounded-lg flex items-center justify-center
@@ -84,22 +95,25 @@ function handlePaste(e) {
     </nav>
 
     <!-- ═══ Hero Section ═══ -->
-    <section class="hero-mesh pt-16 md:pt-24 pb-12 md:pb-16 px-6 text-center">
-      <div class="max-w-[980px] mx-auto">
-        <!-- Headline -->
-        <h1 class="animate-fade-in-up text-[#1d1d1f] text-[clamp(2.25rem,6vw,3.5rem)] font-semibold tracking-tight leading-[1.1] mb-4">
+    <section :class="videoInfo ? 'pt-8 md:pt-10 pb-6' : 'hero-mesh pt-16 md:pt-24 pb-12 md:pb-16'" class="px-6 text-center transition-all duration-500">
+      <div class="max-w-[1200px] mx-auto">
+        <!-- Headline (compact when video loaded) -->
+        <h1 v-if="!videoInfo" class="animate-fade-in-up text-[#1d1d1f] text-[clamp(2.25rem,6vw,3.5rem)] font-semibold tracking-tight leading-[1.1] mb-4">
           下载任何视频<br class="hidden sm:inline" />
           <span class="gradient-text">只需一个链接</span>
         </h1>
+        <h1 v-else class="text-[#1d1d1f] text-lg md:text-xl font-semibold tracking-tight mb-3">
+          <span class="gradient-text">视频已解析</span>
+        </h1>
 
         <!-- Subtitle -->
-        <p class="animate-fade-in-up-delay-1 text-[#86868b] text-base md:text-xl mb-10 md:mb-12 max-w-lg mx-auto leading-relaxed">
+        <p v-if="!videoInfo" class="animate-fade-in-up-delay-1 text-[#86868b] text-base md:text-xl mb-10 md:mb-12 max-w-lg mx-auto leading-relaxed">
           支持 YouTube、Bilibili、抖音、Twitter 等 1000+ 平台<br class="hidden sm:inline" />
           手机也能用，随时随地下载
         </p>
 
         <!-- Input Area -->
-        <div class="animate-fade-in-up-delay-2 max-w-2xl mx-auto">
+        <div :class="videoInfo ? '' : 'animate-fade-in-up-delay-2'" class="max-w-2xl mx-auto">
           <div class="relative flex gap-2 md:gap-3">
             <div class="flex-1 relative">
               <input
@@ -108,12 +122,11 @@ function handlePaste(e) {
                 @paste="handlePaste"
                 type="url"
                 placeholder="在这里粘贴视频链接..."
-                class="w-full pl-4 pr-4 md:pl-5 md:pr-5 py-3 md:py-4 rounded-2xl bg-white text-[#1d1d1f] text-sm md:text-base
+                class="w-full pl-4 pr-4 md:pl-5 md:pr-5 py-3 md:py-3.5 rounded-2xl bg-white text-[#1d1d1f] text-sm md:text-base
                        border border-gray-200 shadow-sm
                        focus:outline-none focus:border-[#0071e3] input-glow
                        placeholder:text-[#c7c7cc] transition-all"
               />
-              <!-- Paste hint icon -->
               <div v-if="!url" class="absolute right-4 top-1/2 -translate-y-1/2 hidden md:flex items-center gap-1.5 text-[#c7c7cc]">
                 <kbd class="px-1.5 py-0.5 text-[10px] bg-gray-50 rounded border border-gray-200">Ctrl</kbd>
                 <span class="text-[10px]">+</span>
@@ -123,7 +136,7 @@ function handlePaste(e) {
             <button
               @click="parse"
               :disabled="!canParse || loading"
-              class="px-5 md:px-8 py-3 md:py-4 bg-[#0071e3] text-white font-medium rounded-2xl text-sm md:text-base
+              class="px-5 md:px-8 py-3 md:py-3.5 bg-[#0071e3] text-white font-medium rounded-2xl text-sm md:text-base
                      hover:bg-[#0077ed] active:bg-[#0071e3] active:scale-[0.98]
                      disabled:opacity-30 disabled:cursor-not-allowed disabled:active:scale-100
                      transition-all whitespace-nowrap shadow-sm"
@@ -152,179 +165,150 @@ function handlePaste(e) {
       </div>
     </section>
 
-    <!-- ═══ Video Result Card ═══ -->
+    <!-- ═══ Video + AI Split Layout ═══ -->
     <transition name="slide">
-      <section v-if="videoInfo" class="max-w-2xl mx-auto w-full px-6 pb-12">
-        <div class="animate-scale-in bg-white rounded-3xl shadow-lg border border-gray-100 overflow-hidden">
+      <section v-if="videoInfo" class="max-w-[1200px] mx-auto w-full px-6 pb-12">
+        <div class="animate-scale-in grid grid-cols-1 lg:grid-cols-5 gap-5">
 
-          <!-- Cover Image Banner -->
-          <div class="relative w-full aspect-video bg-gray-100 overflow-hidden">
-            <img
-              v-if="videoInfo.thumbnail"
-              :src="proxyImageUrl(videoInfo.thumbnail)"
-              alt=""
-              class="w-full h-full object-cover"
-              @error="($event.target).style.display = 'none'"
-            />
-            <!-- Gradient overlay -->
-            <div class="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent"></div>
-
-            <!-- Duration badge (bottom-right) -->
-            <div v-if="videoInfo.duration"
-                 class="absolute bottom-3 right-3 bg-black/70 text-white text-xs px-2 py-1 rounded-lg backdrop-blur-sm">
-              {{ formatDuration(videoInfo.duration) }}
-            </div>
-
-            <!-- Platform badge (top-left) -->
-            <div v-if="videoInfo.platform"
-                 class="absolute top-3 left-3 bg-black/50 text-white text-[10px] px-2.5 py-1 rounded-full font-medium uppercase tracking-wider backdrop-blur-sm">
-              {{ videoInfo.platform }}
-            </div>
-
-            <!-- Video title overlay (bottom) -->
-            <div class="absolute bottom-0 left-0 right-0 p-4 md:p-5">
-              <h3 class="text-white font-semibold text-base md:text-lg leading-snug line-clamp-2 drop-shadow-md">
-                {{ videoInfo.title }}
-              </h3>
-              <p v-if="videoInfo.author" class="text-white/70 text-xs md:text-sm mt-1 drop-shadow-sm">
-                {{ videoInfo.author }}
-              </p>
-            </div>
-          </div>
-
-          <!-- Quality Selector -->
-          <div class="p-5 md:p-6">
-            <label class="text-xs font-medium text-[#86868b] uppercase tracking-wider mb-3 block">选择清晰度</label>
-            <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
-              <button
-                v-for="fmt in videoInfo.formats"
-                :key="fmt.format_id"
-                @click="selectedFormat = fmt.format_id"
-                :class="[
-                  'px-3 py-3 rounded-xl text-sm font-medium transition-all text-center',
-                  selectedFormat === fmt.format_id
-                    ? 'bg-[#0071e3] text-white shadow-sm shadow-blue-200'
-                    : 'bg-[#f5f5f7] text-[#1d1d1f] hover:bg-[#e8e8ed] active:scale-[0.97]'
-                ]"
-              >
-                <div>{{ fmt.resolution }}</div>
-                <div v-if="fmt.filesize" class="text-[10px] mt-0.5 opacity-60">
-                  {{ formatFileSize(fmt.filesize) }}
-                </div>
-              </button>
-            </div>
-          </div>
-
-          <!-- Download Button -->
-          <div class="px-5 md:px-6 pb-5 md:pb-6">
-            <div v-if="!isDone && !isDownloading" class="flex gap-3">
-              <button
-                @click="download"
-                :disabled="!canDownload"
-                class="flex-1 py-4 bg-[#0071e3] text-white font-semibold rounded-2xl text-base
-                       hover:bg-[#0077ed] active:bg-[#0071e3] active:scale-[0.99]
-                       disabled:opacity-30 disabled:cursor-not-allowed
-                       transition-all shadow-sm"
-              >
-                开始下载
-              </button>
-              <button
-                @click="showAiPanel = true; startSummarize(url)"
-                class="px-5 py-4 bg-[#1d1d1f] text-white font-semibold rounded-2xl text-sm
-                       hover:bg-black active:scale-[0.99]
-                       transition-all shadow-sm whitespace-nowrap"
-              >
-                AI 总结
-              </button>
-            </div>
-
-            <!-- Progress -->
-            <div v-if="isDownloading" class="space-y-4">
-              <!-- Progress Bar -->
-              <div class="relative h-2 bg-[#f5f5f7] rounded-full overflow-hidden">
-                <div
-                  class="absolute inset-y-0 left-0 bg-[#0071e3] rounded-full transition-all duration-700 ease-out progress-glow"
-                  :style="{ width: `${progress}%` }"
-                />
+          <!-- ── Left: Video Info Card ── -->
+          <div class="lg:col-span-2 bg-white rounded-2xl border border-gray-100 shadow-lg overflow-hidden">
+            <!-- Cover -->
+            <div class="relative w-full aspect-video bg-gray-100 overflow-hidden">
+              <img
+                v-if="videoInfo.thumbnail"
+                :src="proxyImageUrl(videoInfo.thumbnail)"
+                alt=""
+                class="w-full h-full object-cover"
+                @error="($event.target).style.display = 'none'"
+              />
+              <div class="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent"></div>
+              <div v-if="videoInfo.duration"
+                   class="absolute bottom-2 right-2 bg-black/70 text-white text-[10px] px-1.5 py-0.5 rounded-md backdrop-blur-sm">
+                {{ formatDuration(videoInfo.duration) }}
               </div>
-
-              <!-- Stats Row -->
-              <div class="flex justify-between items-center text-sm">
-                <span class="text-[#1d1d1f] font-semibold tabular-nums">{{ progress }}%</span>
-                <div class="flex items-center gap-3 text-[#86868b] text-xs">
-                  <span v-if="speed">{{ speed }}</span>
-                  <span v-if="total">{{ formatFileSize(downloaded) }} / {{ formatFileSize(total) }}</span>
-                  <span v-if="eta">剩余 {{ eta }}s</span>
-                </div>
+              <div v-if="videoInfo.platform"
+                   class="absolute top-2 left-2 bg-black/50 text-white text-[9px] px-2 py-0.5 rounded-full font-medium uppercase tracking-wider backdrop-blur-sm">
+                {{ videoInfo.platform }}
               </div>
-
-              <!-- Status Text -->
-              <p class="text-center text-sm text-[#86868b] flex items-center justify-center gap-2">
-                <svg v-if="status === 'merging'" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
-                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
-                </svg>
-                {{ status === 'merging' ? '正在合并音视频...' : '下载中...' }}
-              </p>
+              <div class="absolute bottom-0 left-0 right-0 p-3 md:p-4">
+                <h3 class="text-white font-semibold text-sm md:text-base leading-snug line-clamp-2 drop-shadow-md">
+                  {{ videoInfo.title }}
+                </h3>
+                <p v-if="videoInfo.author" class="text-white/70 text-[11px] md:text-xs mt-0.5 drop-shadow-sm">
+                  {{ videoInfo.author }}
+                </p>
+              </div>
             </div>
 
-            <!-- Done -->
-            <div v-if="isDone" class="text-center space-y-4">
-              <div class="w-12 h-12 mx-auto bg-green-50 rounded-full flex items-center justify-center">
-                <svg class="w-6 h-6 text-green-500" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
-                </svg>
-              </div>
-              <div>
-                <p class="text-[#1d1d1f] font-semibold mb-1">下载完成</p>
-                <p class="text-[#86868b] text-sm">视频已准备好，点击保存到本地</p>
-              </div>
-              <a
-                :href="fileUrl"
-                download
-                class="inline-flex items-center gap-2 px-8 py-4 bg-[#0071e3] text-white font-semibold rounded-2xl
-                       hover:bg-[#0077ed] active:scale-[0.98] transition-all text-base shadow-sm"
-              >
-                <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round"
-                        d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
-                </svg>
-                保存到本地
-              </a>
-              <div>
+            <!-- Quality Selector -->
+            <div class="p-4">
+              <label class="text-[10px] font-medium text-[#86868b] uppercase tracking-wider mb-2 block">选择清晰度</label>
+              <div class="grid grid-cols-2 gap-1.5">
                 <button
-                  @click="reset"
-                  class="text-sm text-[#0071e3] hover:underline"
+                  v-for="fmt in videoInfo.formats"
+                  :key="fmt.format_id"
+                  @click="selectedFormat = fmt.format_id"
+                  :class="[
+                    'px-2.5 py-2.5 rounded-xl text-xs font-medium transition-all text-center',
+                    selectedFormat === fmt.format_id
+                      ? 'bg-[#0071e3] text-white shadow-sm shadow-blue-200'
+                      : 'bg-[#f5f5f7] text-[#1d1d1f] hover:bg-[#e8e8ed] active:scale-[0.97]'
+                  ]"
                 >
-                  继续下载其他视频
+                  <div>{{ fmt.resolution }}</div>
+                  <div v-if="fmt.filesize" class="text-[9px] mt-0.5 opacity-60">
+                    {{ formatFileSize(fmt.filesize) }}
+                  </div>
                 </button>
               </div>
             </div>
+
+            <!-- Download Action -->
+            <div class="px-4 pb-4">
+              <div v-if="!isDone && !isDownloading">
+                <button
+                  @click="download"
+                  :disabled="!canDownload"
+                  class="w-full py-3.5 bg-[#0071e3] text-white font-semibold rounded-xl text-sm
+                         hover:bg-[#0077ed] active:bg-[#0071e3] active:scale-[0.99]
+                         disabled:opacity-30 disabled:cursor-not-allowed
+                         transition-all shadow-sm"
+                >
+                  开始下载
+                </button>
+              </div>
+
+              <!-- Progress -->
+              <div v-if="isDownloading" class="space-y-3">
+                <div class="relative h-1.5 bg-[#f5f5f7] rounded-full overflow-hidden">
+                  <div
+                    class="absolute inset-y-0 left-0 bg-[#0071e3] rounded-full transition-all duration-700 ease-out progress-glow"
+                    :style="{ width: `${progress}%` }"
+                  />
+                </div>
+                <div class="flex justify-between items-center text-xs">
+                  <span class="text-[#1d1d1f] font-semibold tabular-nums">{{ progress }}%</span>
+                  <div class="flex items-center gap-2 text-[#86868b] text-[10px]">
+                    <span v-if="speed">{{ speed }}</span>
+                    <span v-if="total">{{ formatFileSize(downloaded) }} / {{ formatFileSize(total) }}</span>
+                    <span v-if="eta">剩余 {{ eta }}s</span>
+                  </div>
+                </div>
+                <p class="text-center text-xs text-[#86868b] flex items-center justify-center gap-1.5">
+                  <svg v-if="status === 'merging'" class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                  </svg>
+                  {{ status === 'merging' ? '正在合并音视频...' : '下载中...' }}
+                </p>
+              </div>
+
+              <!-- Done -->
+              <div v-if="isDone" class="text-center space-y-3">
+                <div class="w-10 h-10 mx-auto bg-green-50 rounded-full flex items-center justify-center">
+                  <svg class="w-5 h-5 text-green-500" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
+                  </svg>
+                </div>
+                <a
+                  :href="fileUrl"
+                  download
+                  class="inline-flex items-center gap-2 px-6 py-3 bg-[#0071e3] text-white font-semibold rounded-xl
+                         hover:bg-[#0077ed] active:scale-[0.98] transition-all text-sm shadow-sm"
+                >
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round"
+                          d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+                  </svg>
+                  保存到本地
+                </a>
+              </div>
+            </div>
+          </div>
+
+          <!-- ── Right: AI Summary Panel ── -->
+          <div class="lg:col-span-3">
+            <AiSummaryPanel
+              :loading="summarizeLoading"
+              :error="summarizeError"
+              :result="summaryResult"
+              :status="summarizeStatus"
+              :message="summarizeMessage"
+              :transcript="transcriptText"
+              :subtitle-data="subtitleData"
+              :mindmap-markdown="mindmapMarkdown"
+              :chat-messages="chatMessages"
+              :chat-loading="chatLoading"
+              @chat="chat"
+              @retry="startSummarize(url)"
+            />
           </div>
         </div>
-      </section>
-    </transition>
 
-    <!-- ═══ AI Summary Panel ═══ -->
-    <transition name="slide">
-      <section v-if="showAiPanel" class="max-w-2xl mx-auto w-full px-6 pb-12">
-        <AiSummaryPanel
-          :loading="summarizeLoading"
-          :error="summarizeError"
-          :result="summaryResult"
-          :status="summarizeStatus"
-          :message="summarizeMessage"
-          :transcript="transcriptText"
-          :subtitle-data="subtitleData"
-          :mindmap-markdown="mindmapMarkdown"
-          :chat-messages="chatMessages"
-          :chat-loading="chatLoading"
-          @chat="chat"
-          @retry="startSummarize(url)"
-        />
-        <div class="text-center mt-3">
-          <button @click="showAiPanel = false; resetSummary()" class="text-sm text-[#86868b] hover:text-[#1d1d1f]">
-            收起
+        <!-- Reset button -->
+        <div class="text-center mt-4">
+          <button @click="handleReset" class="text-sm text-[#86868b] hover:text-[#1d1d1f] transition-colors">
+            继续下载其他视频
           </button>
         </div>
       </section>
