@@ -1,7 +1,9 @@
 <script setup>
 import { ref } from 'vue'
 import { useDownload } from '../composables/useDownload'
+import { useSummarize } from '../composables/useSummarize'
 import { formatFileSize, formatDuration, proxyImageUrl } from '../api'
+import AiSummaryPanel from '../components/AiSummaryPanel.vue'
 
 const {
   url, loading, error, videoInfo, selectedFormat,
@@ -10,6 +12,15 @@ const {
   parse, download, reset,
 } = useDownload()
 
+const {
+  summarizeLoading, summarizeError, summaryResult,
+  summarizeTaskId, summarizeStatus, summarizeMessage,
+  transcriptText, subtitleData, videoTitle, mindmapMarkdown,
+  chatMessages, chatLoading,
+  start: startSummarize, chat, reset: resetSummary,
+} = useSummarize()
+
+const showAiPanel = ref(false)
 const menuOpen = ref(false)
 
 function handleKeydown(e) {
@@ -206,17 +217,26 @@ function handlePaste(e) {
 
           <!-- Download Button -->
           <div class="px-5 md:px-6 pb-5 md:pb-6">
-            <button
-              v-if="!isDone && !isDownloading"
-              @click="download"
-              :disabled="!canDownload"
-              class="w-full py-4 bg-[#0071e3] text-white font-semibold rounded-2xl text-base
-                     hover:bg-[#0077ed] active:bg-[#0071e3] active:scale-[0.99]
-                     disabled:opacity-30 disabled:cursor-not-allowed
-                     transition-all shadow-sm"
-            >
-              开始下载
-            </button>
+            <div v-if="!isDone && !isDownloading" class="flex gap-3">
+              <button
+                @click="download"
+                :disabled="!canDownload"
+                class="flex-1 py-4 bg-[#0071e3] text-white font-semibold rounded-2xl text-base
+                       hover:bg-[#0077ed] active:bg-[#0071e3] active:scale-[0.99]
+                       disabled:opacity-30 disabled:cursor-not-allowed
+                       transition-all shadow-sm"
+              >
+                开始下载
+              </button>
+              <button
+                @click="showAiPanel = true; startSummarize(url)"
+                class="px-5 py-4 bg-[#1d1d1f] text-white font-semibold rounded-2xl text-sm
+                       hover:bg-black active:scale-[0.99]
+                       transition-all shadow-sm whitespace-nowrap"
+              >
+                AI 总结
+              </button>
+            </div>
 
             <!-- Progress -->
             <div v-if="isDownloading" class="space-y-4">
@@ -281,6 +301,31 @@ function handlePaste(e) {
               </div>
             </div>
           </div>
+        </div>
+      </section>
+    </transition>
+
+    <!-- ═══ AI Summary Panel ═══ -->
+    <transition name="slide">
+      <section v-if="showAiPanel" class="max-w-2xl mx-auto w-full px-6 pb-12">
+        <AiSummaryPanel
+          :loading="summarizeLoading"
+          :error="summarizeError"
+          :result="summaryResult"
+          :status="summarizeStatus"
+          :message="summarizeMessage"
+          :transcript="transcriptText"
+          :subtitle-data="subtitleData"
+          :mindmap-markdown="mindmapMarkdown"
+          :chat-messages="chatMessages"
+          :chat-loading="chatLoading"
+          @chat="chat"
+          @retry="startSummarize(url)"
+        />
+        <div class="text-center mt-3">
+          <button @click="showAiPanel = false; resetSummary()" class="text-sm text-[#86868b] hover:text-[#1d1d1f]">
+            收起
+          </button>
         </div>
       </section>
     </transition>

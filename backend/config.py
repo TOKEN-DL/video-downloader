@@ -1,6 +1,16 @@
 import os
 import subprocess
 
+# Load .env file
+_env_path = os.path.join(os.path.dirname(__file__), ".env")
+if os.path.exists(_env_path):
+    with open(_env_path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                key, _, value = line.partition("=")
+                os.environ.setdefault(key.strip(), value.strip())
+
 HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", 8000))
 
@@ -41,6 +51,14 @@ CORS_ORIGINS = [
     "http://127.0.0.1:5173",
     "http://127.0.0.1:3000",
 ]
+
+# AI Summarization
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
+DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
+DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+
+# Bilibili (optional, for videos that require login to access subtitles)
+BILIBILI_SESSDATA = os.getenv("BILIBILI_SESSDATA", "")
 
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 os.makedirs(SUBTITLE_DIR, exist_ok=True)
