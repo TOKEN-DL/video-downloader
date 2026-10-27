@@ -185,7 +185,7 @@ def _verify_audio(task_id: str, filepath: str):
     try:
         import subprocess
         result = subprocess.run(
-            [config.FFMPEG_PATH.replace("ffmpeg", "ffprobe"),
+            [config.FFPROBE_PATH,
              "-v", "quiet", "-print_format", "json",
              "-show_streams", "-select_streams", "a", filepath],
             capture_output=True, text=True, timeout=10
