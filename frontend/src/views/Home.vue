@@ -6,7 +6,7 @@ import { formatFileSize, formatDuration, proxyImageUrl } from '../api'
 import AiSummaryPanel from '../components/AiSummaryPanel.vue'
 
 const {
-  url, loading, error, videoInfo, selectedFormat,
+  url, loading, error, videoInfo, selectedFormat, elapsed,
   status, progress, speed, downloaded, total, eta, fileUrl,
   canParse, canDownload, isDone, isDownloading,
   parse, download, reset: resetDownload,
@@ -146,7 +146,7 @@ function handleReset() {
                   <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
                   <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
                 </svg>
-                解析中
+                解析中<span class="tabular-nums opacity-80">{{ elapsed }}s</span>
               </span>
               <span v-else>解析视频</span>
             </button>

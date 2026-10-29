@@ -7,9 +7,12 @@ __pycache__/
 venv/
 
 # Backend temp files
-backend/downloads/*.mp4
+# downloads 目录下全是运行期产物（成品 mp4、未完成的 .part、yt-dlp 的
+# .ytdl 元数据），一律不纳入版本控制
+backend/downloads/
 backend/subtitles/
 backend/history.db
+backend/logs/
 
 # Frontend
 frontend/node_modules/

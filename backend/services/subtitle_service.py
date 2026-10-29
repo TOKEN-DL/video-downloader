@@ -3,6 +3,7 @@ import logging
 import httpx
 from yt_dlp import YoutubeDL
 import config
+from services.video_service import _YTDL_LOGGER, _retry_sleep
 
 logger = logging.getLogger("subtitle_service")
 
@@ -10,6 +11,10 @@ _HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
     "Referer": "https://www.bilibili.com/",
 }
+
+# 字幕文件多托管在 YouTube/GoogleVideo 等必须走代理的域名上，
+# 直连会 WinError 10060 超时。这里统一复用 config.PROXY。
+_PROXY = config.PROXY or None
 
 
 def _fmt_time(seconds: float) -> str:
@@ -49,7 +54,7 @@ def get_subtitle_data(url: str, lang: str = None) -> list[dict] | None:
 def _extract_bvid(url: str) -> tuple[str, int]:
     """从 URL 提取 bvid 和分 P 编号。返回 (bvid, page)。"""
     if "b23.tv" in url:
-        resp = httpx.head(url, follow_redirects=True, timeout=10, headers=_HEADERS)
+        resp = httpx.head(url, follow_redirects=True, timeout=10, headers=_HEADERS, proxy=_PROXY)
         url = str(resp.url)
 
     m = re.search(r"BV[a-zA-Z0-9]+", url)
@@ -70,6 +75,7 @@ def _get_bilibili_cid(bvid: str, page: int) -> tuple[int, int]:
         params={"bvid": bvid},
         headers=headers,
         timeout=15,
+        proxy=_PROXY,
     )
     resp.raise_for_status()
     data = resp.json().get("data") or {}
@@ -92,6 +98,7 @@ def _get_bilibili_subtitle_list(aid: int, cid: int, bvid: str) -> list[dict]:
         params={"aid": aid, "oid": cid, "type": 1},
         headers=headers,
         timeout=15,
+        proxy=_PROXY,
     )
     resp.raise_for_status()
     data = resp.json()
@@ -123,7 +130,7 @@ def _download_bilibili_subtitle_data(subtitle_url: str) -> list[dict] | None:
     if subtitle_url.startswith("//"):
         subtitle_url = "https:" + subtitle_url
 
-    resp = httpx.get(subtitle_url, headers=_HEADERS, timeout=15)
+    resp = httpx.get(subtitle_url, headers=_HEADERS, timeout=15, proxy=_PROXY)
     resp.raise_for_status()
     data = resp.json()
 
@@ -166,9 +173,17 @@ def _extract_via_info_data(url: str, lang: str | None) -> list[dict] | None:
         "no_warnings": True,
         "ffmpeg_location": config.FFMPEG_PATH,
         "skip_download": True,
+        "socket_timeout": config.YT_SOCKET_TIMEOUT,
+        "retries": config.YT_RETRIES,
+        "fragment_retries": config.YT_FRAGMENT_RETRIES,
+        "retry_sleep": {"http": _retry_sleep, "fragment": _retry_sleep},
+        "logger": _YTDL_LOGGER,
     }
     if config.PROXY:
         opts["proxy"] = config.PROXY
+    if config.JS_RUNTIMES:
+        opts["js_runtimes"] = config.JS_RUNTIMES
+    opts["remote_components"] = set(config.YT_REMOTE_COMPONENTS)
 
     with YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=False)
@@ -200,7 +215,7 @@ def _download_subtitle_track_data(tracks: list[dict]) -> list[dict] | None:
         if not track or not track.get("url"):
             continue
         try:
-            resp = httpx.get(track["url"], follow_redirects=True, timeout=30)
+            resp = httpx.get(track["url"], follow_redirects=True, timeout=30, proxy=_PROXY)
             if resp.status_code != 200 or not resp.text.strip():
                 continue
             if fmt == "json3":

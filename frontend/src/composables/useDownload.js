@@ -15,7 +15,9 @@ export function useDownload() {
   const total = ref(0)
   const eta = ref(null)
   const fileUrl = ref('')
+  const elapsed = ref(0)
   let pollTimer = null
+  let elapsedTimer = null
 
   const canParse = computed(() => url.value.trim().length > 0)
   const canDownload = computed(() => videoInfo.value && selectedFormat.value)
@@ -29,6 +31,11 @@ export function useDownload() {
     status.value = ''
     fileUrl.value = ''
     loading.value = true
+    // 解析要经过多轮网络请求（代理节点偏慢时 YouTube 可能要 20s+），
+    // 显示耗时让用户知道是在跑而不是卡死
+    elapsed.value = 0
+    stopElapsedTimer()
+    elapsedTimer = setInterval(() => { elapsed.value++ }, 1000)
     try {
       videoInfo.value = await parseVideo(url.value)
       if (videoInfo.value.formats.length > 0) {
@@ -38,6 +45,14 @@ export function useDownload() {
       error.value = e.message
     } finally {
       loading.value = false
+      stopElapsedTimer()
+    }
+  }
+
+  function stopElapsedTimer() {
+    if (elapsedTimer) {
+      clearInterval(elapsedTimer)
+      elapsedTimer = null
     }
   }
 
@@ -103,7 +118,7 @@ export function useDownload() {
   }
 
   return {
-    url, loading, error, videoInfo, selectedFormat,
+    url, loading, error, videoInfo, selectedFormat, elapsed,
     taskId, status, progress, speed, downloaded, total, eta, fileUrl,
     canParse, canDownload, isDone, isDownloading,
     parse, download, reset,

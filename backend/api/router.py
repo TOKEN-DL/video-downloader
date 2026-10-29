@@ -3,9 +3,12 @@ import io
 import uuid
 import threading
 import logging
+import re
+from urllib.parse import quote
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel
+import config
 from services.video_service import parse_video, start_download, start_fallback_download, get_status, get_filepath
 from services.subtitle_service import get_subtitle_text, get_subtitle_data
 from services import ai_service
@@ -110,7 +113,13 @@ async def api_proxy_image(url: str):
     if not url:
         raise HTTPException(status_code=400, detail="url参数不能为空")
     try:
-        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+        # 封面域名（i.ytimg.com / i0.hdslb.com）在国内同样需要代理，
+        # 不走代理会直接 ConnectTimeout。
+        async with httpx.AsyncClient(
+            timeout=15,
+            follow_redirects=True,
+            proxy=config.PROXY or None,
+        ) as client:
             resp = await client.get(
                 url,
                 headers={"Referer": url, "User-Agent": "Mozilla/5.0"},
@@ -123,7 +132,8 @@ async def api_proxy_image(url: str):
             headers={"Cache-Control": "public, max-age=86400"},
         )
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"图片获取失败: {str(e)}")
+        # httpx 的 ConnectTimeout 等异常 str() 可能为空，带上类型便于排查
+        raise HTTPException(status_code=400, detail=f"图片获取失败: {type(e).__name__}: {e}")
 
 
 # ============ AI Summarization Endpoints ============
@@ -238,6 +248,16 @@ async def api_ai_chat(req: ChatRequest):
         raise HTTPException(status_code=500, detail=f"AI 对话失败: {str(e)}")
 
 
+def _content_disposition(filename: str) -> str:
+    """构造 Content-Disposition 头。
+
+    Starlette 用 latin-1 编码响应头，中文标题会直接抛 UnicodeEncodeError。
+    按 RFC 5987 对文件名做百分号编码，保证头部是纯 ASCII。
+    """
+    safe = re.sub(r'[\\/:*?"<>|\r\n]+', "_", filename).strip() or "export"
+    return f"attachment; filename*=UTF-8''{quote(safe[:50])}"
+
+
 @router.get("/api/ai/export/{task_id}")
 async def api_ai_export(task_id: str, format: str = "markdown"):
     info = ai_task_progress.get(task_id)
@@ -253,7 +273,7 @@ async def api_ai_export(task_id: str, format: str = "markdown"):
         return StreamingResponse(
             io.BytesIO(pdf_bytes),
             media_type="application/pdf",
-            headers={"Content-Disposition": f"attachment; filename*=UTF-8''{title[:50]}.pdf"},
+            headers={"Content-Disposition": _content_disposition(f"{title[:50]}.pdf")},
         )
 
     # Default: markdown
@@ -261,7 +281,7 @@ async def api_ai_export(task_id: str, format: str = "markdown"):
     return StreamingResponse(
         io.BytesIO(md_content.encode("utf-8")),
         media_type="text/markdown",
-        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{title[:50]}.md"},
+        headers={"Content-Disposition": _content_disposition(f"{title[:50]}.md")},
     )
 
 
