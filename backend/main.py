@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import config
 from api.router import router
 
-app = FastAPI(title="万能视频下载", version="1.0.0")
+app = FastAPI(title="时雨视频分析", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -18,7 +18,7 @@ app.include_router(router)
 
 @app.get("/")
 async def root():
-    return {"message": "万能视频下载 API", "version": "1.0.0"}
+    return {"message": "时雨视频分析 API", "version": "1.0.0"}
 
 
 if __name__ == "__main__":

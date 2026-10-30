@@ -65,7 +65,7 @@ function handleReset() {
                     d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
             </svg>
           </div>
-          <span class="font-semibold text-[#1d1d1f] text-sm tracking-tight">万能下载</span>
+          <span class="font-semibold text-[#1d1d1f] text-sm tracking-tight">时雨视频分析</span>
         </router-link>
 
         <!-- Desktop Links -->
@@ -318,7 +318,7 @@ function handleReset() {
     <section v-if="!videoInfo" id="features" class="bg-[#f5f5f7] py-16 md:py-24 px-6">
       <div class="max-w-[980px] mx-auto">
         <h2 class="text-center text-[#1d1d1f] text-2xl md:text-[32px] font-semibold tracking-tight mb-4">
-          为什么选择万能下载
+          为什么选择时雨视频分析
         </h2>
         <p class="text-center text-[#86868b] text-base md:text-lg mb-12 md:mb-16 max-w-md mx-auto">
           简单、快速、支持所有平台
