@@ -142,6 +142,16 @@ async def api_history_export(record_id: int, format: str = "markdown"):
 
     title = record.get("title") or "视频总结"
 
+    return _export_response(result, title, format)
+
+
+def _export_response(result: dict, title: str, format: str) -> StreamingResponse:
+    """把 AI 结果导出成 Markdown / PDF 响应。
+
+    历史记录导出与 AI 任务导出用的是同一套转换与下载逻辑，只是数据来源不同
+    （一个按记录 id 取库里的结果，一个取内存里的任务结果），所以分支收敛到这里，
+    两个端点共用。
+    """
     if format == "pdf":
         from services.export_service import generate_pdf
         pdf_bytes = generate_pdf(result, title)
@@ -158,42 +168,6 @@ async def api_history_export(record_id: int, format: str = "markdown"):
         media_type="text/markdown",
         headers={"Content-Disposition": _content_disposition(f"{title[:50]}.md")},
     )
-
-
-_RESOLUTION_RE = re.compile(r"(\d+)")
-
-
-def _resolution_height(resolution) -> int | None:
-    """把分辨率标签解析成像素高度；解析不出来（如抖音的 'best'）返回 None。"""
-    text = str(resolution or "").strip().lower()
-    if not text:
-        return None
-    if "x" in text:  # 1920x1080 → 取高度那一半
-        text = text.rsplit("x", 1)[-1]
-    m = _RESOLUTION_RE.search(text)
-    return int(m.group(1)) if m else None
-
-
-def _pick_best_format(formats: list) -> str:
-    """挑分辨率最高的一档；分辨率没法比较（如抖音的 'best'）时取第一档。"""
-    best_id = ""
-    best_height = -1
-    for fmt in formats or []:
-        if not isinstance(fmt, dict):
-            continue
-        format_id = str(fmt.get("format_id") or "").strip()
-        if not format_id:
-            continue
-        height = _resolution_height(fmt.get("resolution"))
-        if height is None:
-            # 高度不可比：先占个位，遇到可比的就让位
-            if not best_id:
-                best_id = format_id
-            continue
-        if height > best_height:
-            best_height = height
-            best_id = format_id
-    return best_id
 
 
 @router.post("/api/history/{record_id}/download")
@@ -213,8 +187,8 @@ async def api_history_download(record_id: int, req: HistoryDownloadRequest | Non
 
     format_id = ((req.format_id if req else None) or "").strip()
     if not format_id:
-        # 没指定清晰度就用记录里分辨率最高的一档
-        format_id = _pick_best_format(record.get("formats") or [])
+        # 没指定清晰度就用记录里分辨率最高的一档（挑选逻辑在服务层）
+        format_id = history_service.pick_best_format(record.get("formats") or [])
     if not format_id:
         raise HTTPException(status_code=400, detail="该记录没有可用的清晰度")
 
@@ -533,22 +507,7 @@ async def api_ai_export(task_id: str, format: str = "markdown"):
     result = info["result"]
     title = info.get("title", "视频总结")
 
-    if format == "pdf":
-        from services.export_service import generate_pdf
-        pdf_bytes = generate_pdf(result, title)
-        return StreamingResponse(
-            io.BytesIO(pdf_bytes),
-            media_type="application/pdf",
-            headers={"Content-Disposition": _content_disposition(f"{title[:50]}.pdf")},
-        )
-
-    # Default: markdown
-    md_content = _result_to_markdown(result, title)
-    return StreamingResponse(
-        io.BytesIO(md_content.encode("utf-8")),
-        media_type="text/markdown",
-        headers={"Content-Disposition": _content_disposition(f"{title[:50]}.md")},
-    )
+    return _export_response(result, title, format)
 
 
 def _result_to_markdown(result: dict, title: str) -> str:

@@ -177,33 +177,3 @@ export async function downloadHistory(id, formatId) {
   }
   return res.json()
 }
-
-// 分辨率标签 → 像素高度；解析不出来（如抖音的 'best'）返回 null
-function resolutionHeight(resolution) {
-  const text = String(resolution || '').trim().toLowerCase()
-  if (!text) return null
-  const base = text.includes('x') ? text.split('x').pop() : text
-  const matched = base.match(/(\d+)/)
-  return matched ? parseInt(matched[1], 10) : null
-}
-
-// 挑分辨率最高的一档；分辨率没法比较时取第一档
-export function pickBestFormat(formats) {
-  let bestId = ''
-  let bestHeight = -1
-  for (const fmt of formats || []) {
-    const formatId = fmt?.format_id
-    if (!formatId) continue
-    const height = resolutionHeight(fmt.resolution)
-    if (height === null) {
-      // 高度不可比：先占个位，遇到可比的就让位
-      if (!bestId) bestId = formatId
-      continue
-    }
-    if (height > bestHeight) {
-      bestHeight = height
-      bestId = formatId
-    }
-  }
-  return bestId
-}

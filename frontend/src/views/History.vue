@@ -2,14 +2,15 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useHistory } from '../composables/useHistory'
-import HistoryThumb from '../components/HistoryThumb.vue'
-import { formatDuration } from '../api'
+import { HISTORY_STATUS, HISTORY_STATUS_META } from '../constants/history'
+import AppNavbar from '../components/AppNavbar.vue'
+import HistoryCover from '../components/HistoryCover.vue'
 
 const router = useRouter()
 
 const {
   items, total, hasMore,
-  loading, loadingMore, error,
+  loading, loadingMore, error, actionError,
   load, loadMore, remove, clearAll,
 } = useHistory()
 
@@ -19,14 +20,17 @@ const confirmingClear = ref(false)
 const deletingId = ref(null)
 
 // 状态徽标：parsed=已解析，ai_done=AI 已总结，ai_failed=AI 失败
-const STATUS_META = {
-  parsed: { label: '已解析', badge: 'bg-gray-100 text-[#86868b]' },
-  ai_done: { label: 'AI 已总结', badge: 'bg-green-50 text-green-600' },
-  ai_failed: { label: 'AI 失败', badge: 'bg-orange-50 text-orange-600' },
+function statusMeta(status) {
+  return HISTORY_STATUS_META[status] || HISTORY_STATUS_META[HISTORY_STATUS.PARSED]
 }
 
-function statusMeta(status) {
-  return STATUS_META[status] || STATUS_META.parsed
+// 徽标的 hover 提示：AI 失败时给出失败原因，
+// 让用户能区分「没字幕」和「模型报错」，而不是只看到一个「AI 失败」。
+function statusTitle(item) {
+  if (item.status === HISTORY_STATUS.AI_FAILED) {
+    return item.error || '未知原因'
+  }
+  return statusMeta(item.status).label
 }
 
 // 后端存的是 "YYYY-MM-DD HH:MM:SS"，展示到分钟即可
@@ -68,25 +72,10 @@ onMounted(load)
   <div class="min-h-screen bg-white flex flex-col font-sans">
 
     <!-- ═══ Navbar ═══ -->
-    <nav class="sticky top-0 z-50 glass-card">
-      <div class="max-w-[1200px] mx-auto px-6 h-11 flex items-center justify-between">
-        <router-link to="/" class="flex items-center gap-2 group">
-          <div class="w-7 h-7 bg-[#0071e3] rounded-lg flex items-center justify-center
-                      group-hover:bg-[#0077ed] transition-colors">
-            <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round"
-                    d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
-            </svg>
-          </div>
-          <span class="font-semibold text-[#1d1d1f] text-sm tracking-tight">时雨视频分析</span>
-        </router-link>
-
-        <div class="flex items-center gap-7 text-xs text-[#86868b]">
-          <router-link to="/history" class="text-[#1d1d1f] font-medium">历史记录</router-link>
-          <router-link to="/" class="hover:text-[#1d1d1f] transition-colors">返回首页</router-link>
-        </div>
-      </div>
-    </nav>
+    <AppNavbar>
+      <router-link to="/history" class="text-[#1d1d1f] font-medium">历史记录</router-link>
+      <router-link to="/" class="hover:text-[#1d1d1f] transition-colors">返回首页</router-link>
+    </AppNavbar>
 
     <!-- ═══ Content ═══ -->
     <section class="flex-1 px-6 py-10 md:py-14">
@@ -130,11 +119,11 @@ onMounted(load)
         </div>
 
         <!-- Error -->
-        <p v-if="error" class="mb-6 text-red-500 text-sm flex items-center justify-center gap-1.5">
+        <p v-if="error || actionError" class="mb-6 text-red-500 text-sm flex items-center justify-center gap-1.5">
           <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
             <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/>
           </svg>
-          {{ error }}
+          {{ error || actionError }}
         </p>
 
         <!-- Loading -->
@@ -169,33 +158,14 @@ onMounted(load)
             @click="openDetail(item.id)"
             class="card-hover bg-white rounded-2xl border border-gray-100 shadow-lg overflow-hidden cursor-pointer"
           >
-            <div class="relative w-full aspect-video bg-gray-100 overflow-hidden">
-              <!-- 封面优先读本地缓存，取不到自动回退远程代理图 -->
-              <HistoryThumb :record="item" alt="" class="w-full h-full object-cover" />
-              <div class="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent"></div>
-              <div v-if="item.duration"
-                   class="absolute bottom-2 right-2 bg-black/70 text-white text-[10px] px-1.5 py-0.5 rounded-md backdrop-blur-sm">
-                {{ formatDuration(item.duration) }}
-              </div>
-              <div v-if="item.platform"
-                   class="absolute top-2 left-2 bg-black/50 text-white text-[9px] px-2 py-0.5 rounded-full font-medium uppercase tracking-wider backdrop-blur-sm">
-                {{ item.platform }}
-              </div>
-              <div class="absolute bottom-0 left-0 right-0 p-3 md:p-4">
-                <h3 class="text-white font-semibold text-sm md:text-base leading-snug line-clamp-2 drop-shadow-md">
-                  {{ item.title }}
-                </h3>
-                <p v-if="item.author" class="text-white/70 text-[11px] md:text-xs mt-0.5 drop-shadow-sm">
-                  {{ item.author }}
-                </p>
-              </div>
-            </div>
+            <HistoryCover :record="item" />
 
             <div class="px-4 py-3 flex items-center justify-between gap-3">
               <span class="text-[11px] text-[#86868b] truncate">解析于 {{ formatTime(item.created_at) }}</span>
               <div class="flex items-center gap-2 shrink-0">
-                <span class="text-[10px] font-medium px-2 py-1 rounded-full"
-                      :class="statusMeta(item.status).badge">
+                <span class="text-[10px] font-medium px-2 py-1 rounded-full cursor-help"
+                      :class="statusMeta(item.status).badge"
+                      :title="statusTitle(item)">
                   {{ statusMeta(item.status).label }}
                 </span>
                 <button
