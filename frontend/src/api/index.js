@@ -69,11 +69,16 @@ export function formatDuration(seconds) {
 
 // ============ AI Summarization ============
 
-export async function startSummarize(url, subtitleLang) {
+export async function startSummarize(url, subtitleLang, historyId) {
   const res = await fetch(`${BASE}/api/ai/summarize`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url, subtitle_lang: subtitleLang || null }),
+    // history_id 带上后，AI 结果直接回写这条历史记录；缺省时后端按 url 兜底匹配
+    body: JSON.stringify({
+      url,
+      subtitle_lang: subtitleLang || null,
+      history_id: historyId ?? null,
+    }),
   })
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
@@ -150,4 +155,9 @@ export async function clearHistory() {
 // 本地缓存的封面（封面 URL 带签名会过期，历史页优先读本地这张）
 export function getHistoryThumbUrl(recordId) {
   return `${BASE}/api/history/thumb/${recordId}`
+}
+
+// 历史记录里的 AI 总结导出（历史记录没有内存里的 task_id，走按记录的导出接口）
+export function getHistoryExportUrl(recordId, format) {
+  return `${BASE}/api/history/${recordId}/export?format=${format}`
 }
