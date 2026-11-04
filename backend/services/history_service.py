@@ -71,6 +71,32 @@ def upsert_parsed(url: str, video_info: dict, subtitle_lang: str | None = None) 
     return row["id"]
 
 
+def _loads(raw: str | None, default):
+    """反序列化 JSON 列；内容坏了就退回默认值，不让整个接口 500。"""
+    if not raw:
+        return default
+    try:
+        return json.loads(raw)
+    except (TypeError, ValueError):
+        return default
+
+
+def get_record(record_id: int) -> dict | None:
+    """取完整记录（含字幕 / AI 大字段）。记录不存在返回 None。"""
+    conn = db.get_conn()
+    row = conn.execute("SELECT * FROM history WHERE id = ?", (record_id,)).fetchone()
+    if row is None:
+        return None
+
+    record = {key: row[key] for key in row.keys()}
+    record["formats"] = _loads(record.pop("formats_json"), [])
+    record["subtitle_data"] = _loads(record.pop("subtitle_json"), [])
+    record["ai_result"] = _loads(record.pop("ai_result"), None)
+    record["mindmap_markdown"] = record.pop("mindmap_md") or ""
+    record["has_ai"] = record["status"] == "ai_done"
+    return record
+
+
 def list_records(
     page: int = 1,
     page_size: int | None = None,

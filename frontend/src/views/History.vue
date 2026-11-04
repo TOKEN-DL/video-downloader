@@ -1,14 +1,22 @@
 <script setup>
-import { onMounted } from 'vue'
+import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { useHistory } from '../composables/useHistory'
 import HistoryThumb from '../components/HistoryThumb.vue'
 import { formatDuration } from '../api'
 
+const router = useRouter()
+
 const {
   items, total, hasMore,
   loading, loadingMore, error,
-  load, loadMore,
+  load, loadMore, remove, clearAll,
 } = useHistory()
+
+// 清空全部要二次确认：第一次点只亮出确认按钮
+const confirmingClear = ref(false)
+// 正在删除的记录 id，避免连点触发多次请求
+const deletingId = ref(null)
 
 // 状态徽标：parsed=已解析，ai_done=AI 已总结，ai_failed=AI 失败
 const STATUS_META = {
@@ -24,6 +32,33 @@ function statusMeta(status) {
 // 后端存的是 "YYYY-MM-DD HH:MM:SS"，展示到分钟即可
 function formatTime(value) {
   return value ? String(value).slice(0, 16) : ''
+}
+
+function openDetail(id) {
+  router.push(`/history/${id}`)
+}
+
+async function handleDelete(id) {
+  if (deletingId.value !== null) return
+  deletingId.value = id
+  try {
+    await remove(id)
+  } finally {
+    deletingId.value = null
+  }
+}
+
+function askClear() {
+  confirmingClear.value = true
+}
+
+function cancelClear() {
+  confirmingClear.value = false
+}
+
+async function confirmClear() {
+  const ok = await clearAll()
+  if (ok) confirmingClear.value = false
 }
 
 onMounted(load)
@@ -58,9 +93,40 @@ onMounted(load)
       <div class="max-w-[1200px] mx-auto">
 
         <!-- Header -->
-        <div class="flex items-baseline justify-between mb-8">
-          <h1 class="text-[#1d1d1f] text-2xl md:text-[32px] font-semibold tracking-tight">历史记录</h1>
-          <span v-if="total > 0" class="text-xs text-[#86868b] tabular-nums">共 {{ total }} 条</span>
+        <div class="flex items-center justify-between gap-4 mb-8">
+          <div class="flex items-baseline gap-4">
+            <h1 class="text-[#1d1d1f] text-2xl md:text-[32px] font-semibold tracking-tight">历史记录</h1>
+            <span v-if="total > 0" class="text-xs text-[#86868b] tabular-nums">共 {{ total }} 条</span>
+          </div>
+
+          <!-- 清空全部：二次确认 -->
+          <div v-if="total > 0" class="flex items-center gap-2">
+            <template v-if="confirmingClear">
+              <span class="text-xs text-[#86868b]">确认清空全部？</span>
+              <button
+                @click="confirmClear"
+                class="px-3 py-1.5 bg-red-500 text-white font-medium rounded-lg text-xs
+                       hover:bg-red-600 active:scale-[0.97] transition-all"
+              >
+                确认清空
+              </button>
+              <button
+                @click="cancelClear"
+                class="px-3 py-1.5 bg-[#f5f5f7] text-[#1d1d1f] font-medium rounded-lg text-xs
+                       hover:bg-[#e8e8ed] active:scale-[0.97] transition-all"
+              >
+                取消
+              </button>
+            </template>
+            <button
+              v-else
+              @click="askClear"
+              class="px-3 py-1.5 bg-[#f5f5f7] text-[#86868b] font-medium rounded-lg text-xs
+                     hover:bg-red-50 hover:text-red-500 active:scale-[0.97] transition-all"
+            >
+              清空全部
+            </button>
+          </div>
         </div>
 
         <!-- Error -->
@@ -100,7 +166,8 @@ onMounted(load)
           <article
             v-for="item in items"
             :key="item.id"
-            class="card-hover bg-white rounded-2xl border border-gray-100 shadow-lg overflow-hidden"
+            @click="openDetail(item.id)"
+            class="card-hover bg-white rounded-2xl border border-gray-100 shadow-lg overflow-hidden cursor-pointer"
           >
             <div class="relative w-full aspect-video bg-gray-100 overflow-hidden">
               <!-- 封面优先读本地缓存，取不到自动回退远程代理图 -->
@@ -126,10 +193,24 @@ onMounted(load)
 
             <div class="px-4 py-3 flex items-center justify-between gap-3">
               <span class="text-[11px] text-[#86868b] truncate">解析于 {{ formatTime(item.created_at) }}</span>
-              <span class="shrink-0 text-[10px] font-medium px-2 py-1 rounded-full"
-                    :class="statusMeta(item.status).badge">
-                {{ statusMeta(item.status).label }}
-              </span>
+              <div class="flex items-center gap-2 shrink-0">
+                <span class="text-[10px] font-medium px-2 py-1 rounded-full"
+                      :class="statusMeta(item.status).badge">
+                  {{ statusMeta(item.status).label }}
+                </span>
+                <button
+                  @click.stop="handleDelete(item.id)"
+                  :disabled="deletingId !== null"
+                  title="删除这条记录"
+                  class="w-7 h-7 rounded-lg bg-[#f5f5f7] text-[#86868b] hover:bg-red-50 hover:text-red-500
+                         active:scale-[0.95] disabled:opacity-40 transition-all flex items-center justify-center"
+                >
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round"
+                          d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                  </svg>
+                </button>
+              </div>
             </div>
           </article>
         </div>

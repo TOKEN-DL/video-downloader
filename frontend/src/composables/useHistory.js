@@ -1,5 +1,5 @@
 import { ref, computed } from 'vue'
-import { listHistory } from '../api'
+import { listHistory, getHistory, deleteHistory, clearHistory } from '../api'
 
 const PAGE_SIZE = 20
 
@@ -10,6 +10,9 @@ export function useHistory() {
   const loading = ref(false)
   const loadingMore = ref(false)
   const error = ref('')
+
+  const detail = ref(null)
+  const detailLoading = ref(false)
 
   const hasMore = computed(() => items.value.length < total.value)
 
@@ -47,9 +50,54 @@ export function useHistory() {
     }
   }
 
+  // 记录详情（详情页用）
+  async function loadDetail(id) {
+    error.value = ''
+    detail.value = null
+    detailLoading.value = true
+    try {
+      detail.value = await getHistory(id)
+      return detail.value
+    } catch (e) {
+      error.value = e.message
+      return null
+    } finally {
+      detailLoading.value = false
+    }
+  }
+
+  // 删除单条：后端删成功后本地列表同步去掉这一条
+  async function remove(id) {
+    error.value = ''
+    try {
+      await deleteHistory(id)
+      items.value = items.value.filter(item => item.id !== id)
+      total.value = Math.max(0, total.value - 1)
+      return true
+    } catch (e) {
+      error.value = e.message
+      return false
+    }
+  }
+
+  // 清空全部
+  async function clearAll() {
+    error.value = ''
+    try {
+      await clearHistory()
+      items.value = []
+      total.value = 0
+      return true
+    } catch (e) {
+      error.value = e.message
+      return false
+    }
+  }
+
   return {
     items, total, page, hasMore,
     loading, loadingMore, error,
-    load, loadMore,
+    detail, detailLoading,
+    load, loadMore, loadDetail, remove, clearAll,
   }
 }

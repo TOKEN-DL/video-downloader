@@ -49,8 +49,9 @@ class ParseStub:
 
 @pytest.fixture
 def temp_db(tmp_path, monkeypatch):
-    """把 config.DB_PATH 指向临时目录，并重置线程内的连接缓存。"""
+    """把 config.DB_PATH / config.HISTORY_THUMB_DIR 指向临时目录，并重置线程内的连接缓存。"""
     monkeypatch.setattr(config, "DB_PATH", str(tmp_path / "history.db"))
+    monkeypatch.setattr(config, "HISTORY_THUMB_DIR", str(tmp_path / "thumbs"))
     db.close_conn()
     yield config.DB_PATH
     db.close_conn()

@@ -109,6 +109,19 @@ async def api_history_list(
     )
 
 
+@router.get("/api/history/{record_id}")
+async def api_history_detail(record_id: int):
+    """记录详情：含格式列表与字幕 / AI 数据。
+
+    {record_id} 是 int，匹配不到 /api/history/thumb/{id} 这类非数字路径，
+    两个路由不会互相抢请求。
+    """
+    record = history_service.get_record(record_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="记录不存在")
+    return record
+
+
 @router.get("/api/history/thumb/{record_id}")
 async def api_history_thumb(record_id: int):
     """本地缓存的封面。文件不存在返回 404，前端回退远程代理图。"""
