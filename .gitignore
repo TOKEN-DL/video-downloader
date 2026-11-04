@@ -12,6 +12,9 @@ venv/
 backend/downloads/
 backend/subtitles/
 backend/history.db
+# SQLite WAL 模式的伴生文件
+backend/history.db-wal
+backend/history.db-shm
 backend/logs/
 
 # Frontend

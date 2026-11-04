@@ -70,6 +70,7 @@ function handleReset() {
 
         <!-- Desktop Links -->
         <div class="hidden md:flex items-center gap-7 text-xs text-[#86868b]">
+          <router-link to="/history" class="hover:text-[#1d1d1f] transition-colors">历史记录</router-link>
           <a href="#features" class="hover:text-[#1d1d1f] transition-colors">功能</a>
           <a href="#platforms" class="hover:text-[#1d1d1f] transition-colors">支持平台</a>
           <a href="#pricing" class="hover:text-[#1d1d1f] transition-colors">定价</a>
@@ -88,6 +89,7 @@ function handleReset() {
 
       <!-- Mobile Menu -->
       <div v-if="menuOpen" class="md:hidden border-t border-gray-100 px-6 py-4 space-y-3 text-sm text-[#1d1d1f]">
+        <router-link to="/history" @click="menuOpen = false" class="block py-1">历史记录</router-link>
         <a href="#features" @click="menuOpen = false" class="block py-1">功能</a>
         <a href="#platforms" @click="menuOpen = false" class="block py-1">支持平台</a>
         <a href="#pricing" @click="menuOpen = false" class="block py-1">定价</a>
