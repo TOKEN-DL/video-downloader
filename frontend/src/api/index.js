@@ -161,3 +161,47 @@ export function getHistoryThumbUrl(recordId) {
 export function getHistoryExportUrl(recordId, format) {
   return `${BASE}/api/history/${recordId}/export?format=${format}`
 }
+
+// 从历史记录重新下载：服务端会用记录里的链接与清晰度重新走网络下载
+export async function downloadHistory(id, formatId) {
+  const res = await fetch(`${BASE}/api/history/${id}/download`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ format_id: formatId || null }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(_extractDetail(err) || '启动下载失败')
+  }
+  return res.json()
+}
+
+// 分辨率标签 → 像素高度；解析不出来（如抖音的 'best'）返回 null
+function resolutionHeight(resolution) {
+  const text = String(resolution || '').trim().toLowerCase()
+  if (!text) return null
+  const base = text.includes('x') ? text.split('x').pop() : text
+  const matched = base.match(/(\d+)/)
+  return matched ? parseInt(matched[1], 10) : null
+}
+
+// 挑分辨率最高的一档；分辨率没法比较时取第一档
+export function pickBestFormat(formats) {
+  let bestId = ''
+  let bestHeight = -1
+  for (const fmt of formats || []) {
+    const formatId = fmt?.format_id
+    if (!formatId) continue
+    const height = resolutionHeight(fmt.resolution)
+    if (height === null) {
+      // 高度不可比：先占个位，遇到可比的就让位
+      if (!bestId) bestId = formatId
+      continue
+    }
+    if (height > bestHeight) {
+      bestHeight = height
+      bestId = formatId
+    }
+  }
+  return bestId
+}

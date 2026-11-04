@@ -23,6 +23,7 @@ export function useDownload() {
   const canDownload = computed(() => videoInfo.value && selectedFormat.value)
   const isDone = computed(() => status.value === 'done')
   const isDownloading = computed(() => status.value === 'downloading' || status.value === 'merging')
+  const isStarting = computed(() => status.value === 'starting')
 
   async function parse() {
     error.value = ''
@@ -57,16 +58,37 @@ export function useDownload() {
   }
 
   async function download() {
+    return downloadWith(url.value, selectedFormat.value)
+  }
+
+  /**
+   * 按指定的 url + format_id 下载：流程与 download() 完全一致（同一个接口、
+   * 同一套轮询与文件链接），区别是参数显式传入，不依赖组件内部状态。
+   * 返回 task_id；失败时把原因写进 error 并返回 null。
+   */
+  async function downloadWith(targetUrl, formatId) {
     error.value = ''
     status.value = 'starting'
     try {
-      const res = await startDownload(url.value, selectedFormat.value)
+      const res = await startDownload(targetUrl, formatId)
       taskId.value = res.task_id
       startPolling()
+      return res.task_id
     } catch (e) {
       error.value = e.message
       status.value = 'error'
+      return null
     }
+  }
+
+  /**
+   * 接管一个已经启动好的下载任务：历史记录下载的 task_id 由
+   * POST /api/history/{id}/download 返回，这里只负责轮询进度与出文件链接。
+   */
+  function track(id) {
+    taskId.value = id
+    status.value = 'starting'
+    startPolling()
   }
 
   function startPolling() {
@@ -120,7 +142,7 @@ export function useDownload() {
   return {
     url, loading, error, videoInfo, selectedFormat, elapsed,
     taskId, status, progress, speed, downloaded, total, eta, fileUrl,
-    canParse, canDownload, isDone, isDownloading,
-    parse, download, reset,
+    canParse, canDownload, isDone, isDownloading, isStarting,
+    parse, download, downloadWith, track, reset,
   }
 }
