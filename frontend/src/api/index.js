@@ -100,7 +100,9 @@ export async function sendChatMessage(messages, transcriptContext) {
   const res = await fetch(`${BASE}/api/ai/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url: '', messages, transcript_context: transcriptContext }),
+    // 对话的上下文只有字幕：历史记录没有可靠的链接上下文（可能是短链），
+    // 后端也不依赖 url，所以这里不传。
+    body: JSON.stringify({ messages, transcript_context: transcriptContext }),
   })
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))

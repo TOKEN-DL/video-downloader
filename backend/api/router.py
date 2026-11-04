@@ -45,7 +45,9 @@ class SummarizeRequest(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    url: str
+    # url 不参与对话：上下文只有字幕。历史记录没有可靠的链接上下文
+    # （可能是短链甚至已失效），所以这里不要求调用方提供 url。
+    url: str = ""
     messages: list[dict]
     transcript_context: str
 
@@ -492,14 +494,20 @@ async def api_ai_summarize_status(task_id: str):
 
 @router.post("/api/ai/chat")
 async def api_ai_chat(req: ChatRequest):
-    if not req.messages:
+    # 全是空白的问题等于没问：同样不该发给模型
+    if not req.messages or not any(
+        (m.get("content") or "").strip() for m in req.messages
+    ):
         raise HTTPException(status_code=400, detail="消息不能为空")
-    if not req.transcript_context:
+    # 只有空白的上下文等同于没有：不能拿着空上下文去问模型，
+    # 要么明确报错，要么由前端先给出提示。
+    transcript = (req.transcript_context or "").strip()
+    if not transcript:
         raise HTTPException(status_code=400, detail="缺少视频字幕上下文")
 
     try:
         reply = await asyncio.to_thread(
-            ai_service.chat, req.transcript_context, req.messages
+            ai_service.chat, transcript, req.messages
         )
         return {"message": {"role": "assistant", "content": reply}}
     except Exception as e:

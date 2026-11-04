@@ -23,7 +23,7 @@ const {
   summarizeLoading, summarizeError, summaryResult,
   summarizeStatus, summarizeMessage,
   transcriptText, subtitleData, mindmapMarkdown,
-  chatMessages, chatLoading,
+  chatMessages, chatLoading, chatError, chatHint,
   load: loadSummary, chat,
 } = useSummarize()
 
@@ -298,6 +298,8 @@ onMounted(async () => {
               :mindmap-markdown="mindmapMarkdown"
               :chat-messages="chatMessages"
               :chat-loading="chatLoading"
+              :chat-error="chatError"
+              :chat-hint="chatHint"
               @chat="chat"
               @retry="handleRetry"
             />

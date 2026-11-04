@@ -49,6 +49,9 @@ FAKE_AI_RESULT = {
 
 FAKE_MINDMAP = "# 示例视频标题\n\n## 第一节\n- 缓存分层\n"
 
+# AI 对话的固定回答：测试断言以此为准。
+FAKE_CHAT_REPLY = "这个视频主要讲了缓存分层设计。"
+
 
 class ParseStub:
     """打桩视频解析（yt-dlp 属于外部世界，不该在测试里真联网）。"""
@@ -174,10 +177,13 @@ class AiStub:
         self.error: Exception | None = None  # 赋异常即模拟模型报错
         self.transcript = None
         self.title = None
+        self.summarize_calls = 0
+        self.mindmap_calls = 0
 
     def summarize(self, transcript: str, title: str) -> dict:
         if self.error is not None:
             raise self.error
+        self.summarize_calls += 1
         self.transcript = transcript
         self.title = title
         return self.result
@@ -185,6 +191,7 @@ class AiStub:
     def generate_mindmap_markdown(self, summary: dict, title: str) -> str:
         if self.error is not None:
             raise self.error
+        self.mindmap_calls += 1
         return self.mindmap
 
 
@@ -196,6 +203,34 @@ def stub_ai(monkeypatch):
     stub = AiStub()
     monkeypatch.setattr(ai_service, "summarize", stub.summarize)
     monkeypatch.setattr(ai_service, "generate_mindmap_markdown", stub.generate_mindmap_markdown)
+    return stub
+
+
+class AiChatStub:
+    """打桩 AI 对话（模型调用属于外部世界，不该在测试里真联网）。
+
+    calls 里记下每次收到的字幕上下文与消息，用于断言「上下文来自库里存下的字幕」。
+    """
+
+    def __init__(self):
+        self.reply = FAKE_CHAT_REPLY
+        self.error: Exception | None = None  # 赋异常即模拟模型报错
+        self.calls: list[dict] = []
+
+    def __call__(self, transcript: str, messages: list[dict]) -> str:
+        if self.error is not None:
+            raise self.error
+        self.calls.append({"transcript": transcript, "messages": list(messages)})
+        return self.reply
+
+
+@pytest.fixture
+def stub_ai_chat(monkeypatch):
+    """替换 AI 对话；路由层的编排与校验照常真实执行。"""
+    from services import ai_service
+
+    stub = AiChatStub()
+    monkeypatch.setattr(ai_service, "chat", stub)
     return stub
 
 

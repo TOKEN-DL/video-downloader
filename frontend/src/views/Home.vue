@@ -19,7 +19,7 @@ const {
   summarizeLoading, summarizeError, summaryResult,
   summarizeTaskId, summarizeStatus, summarizeMessage,
   transcriptText, subtitleData, videoTitle, mindmapMarkdown,
-  chatMessages, chatLoading,
+  chatMessages, chatLoading, chatError, chatHint,
   start: startSummarize, chat, reset: resetSummary,
 } = useSummarize()
 
@@ -310,6 +310,8 @@ function handleReset() {
               :mindmap-markdown="mindmapMarkdown"
               :chat-messages="chatMessages"
               :chat-loading="chatLoading"
+              :chat-error="chatError"
+              :chat-hint="chatHint"
               @chat="chat"
               @retry="startSummarize(url)"
             />

@@ -1,4 +1,4 @@
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { startSummarize, getSummarizeStatus, sendChatMessage } from '../api'
 
 export function useSummarize() {
@@ -15,8 +15,23 @@ export function useSummarize() {
 
   const chatMessages = ref([])
   const chatLoading = ref(false)
+  // 对话区域里的错误提示（请求失败 / 没有可用的字幕上下文）
+  const chatError = ref('')
 
   let pollTimer = null
+
+  // 没有字幕上下文时的提示：字幕是提问的依据，没有它就别去问 AI
+  const CHAT_NO_CONTEXT_HINT = '还没有可用的字幕，暂时无法进行 AI 问答。'
+  const CHAT_NO_CONTEXT_HINT_PARSED = 'AI 分析尚未完成，还没有可用的字幕可供提问。'
+
+  // 提问的前提是字幕。没有字幕上下文时给出原因（AI 还没跑 / 视频没字幕），
+  // 由面板展示，提示文案只有这一处。
+  const chatHint = computed(() => {
+    if (transcriptText.value.trim()) return ''
+    return summarizeStatus.value === 'parsed'
+      ? CHAT_NO_CONTEXT_HINT_PARSED
+      : CHAT_NO_CONTEXT_HINT
+  })
 
   function _extractError(err) {
     if (!err) return '未知错误'
@@ -67,6 +82,7 @@ export function useSummarize() {
     summarizeLoading.value = false
     chatMessages.value = []
     chatLoading.value = false
+    chatError.value = ''
 
     if (record.status === 'ai_failed') {
       summarizeStatus.value = 'error'
@@ -122,6 +138,13 @@ export function useSummarize() {
 
   async function chat(question) {
     if (!question.trim() || chatLoading.value) return
+    chatError.value = ''
+    // 没有字幕上下文就不发请求：记录可能没字幕，也可能还没跑过 AI。
+    // 直接给提示，别拿空上下文去问一句。
+    if (!transcriptText.value.trim()) {
+      chatError.value = chatHint.value
+      return
+    }
     chatLoading.value = true
     chatMessages.value.push({ role: 'user', content: question })
 
@@ -132,7 +155,8 @@ export function useSummarize() {
       )
       chatMessages.value.push(res.message)
     } catch (e) {
-      chatMessages.value.push({ role: 'assistant', content: `出错了: ${_extractError(e)}` })
+      // 错误显示在对话区域，不塞一条假回答冒充 AI 的回复
+      chatError.value = `AI 对话失败: ${_extractError(e)}`
     } finally {
       chatLoading.value = false
     }
@@ -152,13 +176,14 @@ export function useSummarize() {
     mindmapMarkdown.value = ''
     chatMessages.value = []
     chatLoading.value = false
+    chatError.value = ''
   }
 
   return {
     summarizeLoading, summarizeError, summaryResult,
     summarizeTaskId, summarizeStatus, summarizeMessage,
     transcriptText, subtitleData, videoTitle, mindmapMarkdown,
-    chatMessages, chatLoading,
+    chatMessages, chatLoading, chatError, chatHint,
     start, load, chat, reset,
   }
 }
