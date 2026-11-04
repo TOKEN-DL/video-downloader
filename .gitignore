@@ -34,3 +34,6 @@ Thumbs.db
 
 # Env
 .env
+
+# Git worktrees (implement-spec 多票并行开发用)
+.worktrees/
