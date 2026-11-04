@@ -27,6 +27,10 @@
         <div v-if="summaryHtml" class="flex-1 overflow-y-auto max-h-[600px] pr-1">
           <div class="summary-prose prose prose-slate prose-sm max-w-none" v-html="summaryHtml"></div>
         </div>
+        <!-- 还没有总结时的说明（如历史记录里 AI 尚未跑完） -->
+        <div v-else-if="!loading && !error" class="flex flex-col items-center justify-center py-16 text-[#86868b]">
+          <p class="text-sm">{{ statusMessage }}</p>
+        </div>
         <div v-if="loading && summaryHtml" class="mt-2 inline-flex items-center gap-1.5 text-xs text-[#86868b]">
           <span class="w-1.5 h-1.5 bg-[#0071e3] rounded-full animate-pulse"></span>
           AI 正在生成中...

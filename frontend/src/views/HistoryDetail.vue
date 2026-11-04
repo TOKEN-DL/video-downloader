@@ -1,17 +1,37 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useHistory } from '../composables/useHistory'
+import { useSummarize } from '../composables/useSummarize'
 import HistoryThumb from '../components/HistoryThumb.vue'
-import { formatFileSize, formatDuration } from '../api'
+import AiSummaryPanel from '../components/AiSummaryPanel.vue'
+import { formatFileSize, formatDuration, getHistoryExportUrl } from '../api'
 
 const route = useRoute()
+const router = useRouter()
 
 const { detail, detailLoading, error, loadDetail } = useHistory()
+
+// AI 面板的数据来自库里那条记录，不是当场再跑一次 AI
+const {
+  summarizeLoading, summarizeError, summaryResult,
+  summarizeStatus, summarizeMessage,
+  transcriptText, subtitleData, mindmapMarkdown,
+  chatMessages, chatLoading,
+  load: loadSummary, chat,
+} = useSummarize()
 
 // 清晰度选择：默认选中第一档
 const selectedFormat = ref('')
 const formats = computed(() => detail.value?.formats || [])
+
+// 导出：历史记录没有内存里的 task_id，走按记录的导出接口
+const exportMarkdownUrl = computed(() =>
+  detail.value ? getHistoryExportUrl(detail.value.id, 'markdown') : ''
+)
+const exportPdfUrl = computed(() =>
+  detail.value ? getHistoryExportUrl(detail.value.id, 'pdf') : ''
+)
 
 watch(formats, (list) => {
   if (list.length && !list.some(f => f.format_id === selectedFormat.value)) {
@@ -19,7 +39,16 @@ watch(formats, (list) => {
   }
 })
 
-onMounted(() => loadDetail(route.params.id))
+// AI 失败后想重来：带着原链接回首页重新解析
+function handleRetry() {
+  if (!detail.value?.url) return
+  router.push({ path: '/', query: { url: detail.value.url } })
+}
+
+onMounted(async () => {
+  const record = await loadDetail(route.params.id)
+  if (record) loadSummary(record)
+})
 </script>
 
 <template>
@@ -136,20 +165,68 @@ onMounted(() => loadDetail(route.params.id))
             </div>
           </div>
 
-          <!-- ── Right: AI Panel Placeholder ── -->
+          <!-- ── Right: AI Panel ── -->
           <div class="lg:col-span-3">
-            <div class="h-full min-h-[280px] rounded-2xl border border-dashed border-gray-200 bg-[#f5f5f7]
-                        p-8 flex flex-col items-center justify-center text-center">
-              <div class="w-12 h-12 mb-4 bg-white rounded-2xl flex items-center justify-center shadow-sm">
-                <svg class="w-6 h-6 text-[#0071e3]" fill="none" stroke="currentColor" stroke-width="1.6" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round"
-                        d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456z"/>
-                </svg>
+
+            <!-- AI 失败：记录保留，标出失败原因 -->
+            <div v-if="detail.status === 'ai_failed'"
+                 class="mb-3 rounded-2xl border border-orange-200 bg-orange-50 px-4 py-3 flex items-start gap-3">
+              <svg class="w-4 h-4 mt-0.5 shrink-0 text-orange-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+              </svg>
+              <div class="flex-1 min-w-0">
+                <p class="text-xs font-semibold text-orange-700">AI 总结失败</p>
+                <p class="text-xs text-orange-600 mt-0.5 break-words">{{ detail.error || '未知原因' }}</p>
+                <p class="text-[11px] text-orange-500 mt-1">视频信息已保留，可回到首页重新解析该链接再试一次。</p>
               </div>
-              <h3 class="text-[#1d1d1f] font-semibold text-sm mb-1.5">AI 分析内容</h3>
-              <p class="text-[#86868b] text-xs leading-relaxed max-w-xs">
-                该视频的 AI 总结、字幕与思维导图会显示在这里。
-              </p>
+            </div>
+
+            <!-- 只解析过、还没跑 AI -->
+            <div v-else-if="detail.status === 'parsed'"
+                 class="mb-3 rounded-2xl border border-gray-200 bg-[#f5f5f7] px-4 py-3">
+              <p class="text-xs text-[#86868b]">AI 分析尚未完成。回到首页重新解析该链接，可再跑一次 AI 总结。</p>
+            </div>
+
+            <!-- AI 面板：总结 / 字幕 / 思维导图 / AI 问答 -->
+            <AiSummaryPanel
+              :loading="summarizeLoading"
+              :error="summarizeError"
+              :result="summaryResult"
+              :status="summarizeStatus"
+              :message="summarizeMessage"
+              :transcript="transcriptText"
+              :subtitle-data="subtitleData"
+              :mindmap-markdown="mindmapMarkdown"
+              :chat-messages="chatMessages"
+              :chat-loading="chatLoading"
+              @chat="chat"
+              @retry="handleRetry"
+            />
+
+            <!-- 导出总结 -->
+            <div class="mt-3 flex items-center gap-2">
+              <a
+                :href="exportMarkdownUrl"
+                download
+                class="inline-flex items-center gap-1.5 px-3.5 py-2 bg-white border border-gray-200 rounded-xl text-xs
+                       font-medium text-[#1d1d1f] hover:bg-[#f5f5f7] active:scale-[0.98] transition-all"
+              >
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+                </svg>
+                导出 Markdown
+              </a>
+              <a
+                :href="exportPdfUrl"
+                download
+                class="inline-flex items-center gap-1.5 px-3.5 py-2 bg-white border border-gray-200 rounded-xl text-xs
+                       font-medium text-[#1d1d1f] hover:bg-[#f5f5f7] active:scale-[0.98] transition-all"
+              >
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+                </svg>
+                导出 PDF
+              </a>
             </div>
           </div>
         </div>

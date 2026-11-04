@@ -34,6 +34,21 @@ DEFAULT_VIDEO_INFO = {
     "subtitles": [],
 }
 
+# 外部世界（字幕提取 / AI 模型）的替身数据：固定字面量，测试断言以此为准。
+FAKE_SUBTITLE = [
+    {"time": "0:00", "text": "开场白"},
+    {"time": "0:12", "text": "第二句话"},
+]
+
+FAKE_AI_RESULT = {
+    "summary": "视频讲了一个关于缓存设计的例子。",
+    "highlights": [{"timestamp": "01:23", "point": "先讲问题再给方案"}],
+    "terms": [{"term": "缓存穿透", "explanation": "请求绕过缓存直接打到数据库"}],
+    "qa": [{"question": "视频的核心结论是什么？", "answer": "缓存要分层设计。"}],
+}
+
+FAKE_MINDMAP = "# 示例视频标题\n\n## 第一节\n- 缓存分层\n"
+
 
 class ParseStub:
     """打桩视频解析（yt-dlp 属于外部世界，不该在测试里真联网）。"""
@@ -145,3 +160,62 @@ def stub_thumb_download(monkeypatch):
         deadline = time.time() + 5
         while not stub.finished and time.time() < deadline:
             time.sleep(0.05)
+
+
+# ============ AI 总结 / 字幕提取打桩 ============
+
+
+class AiStub:
+    """打桩 AI 总结与思维导图生成（模型调用属于外部世界，不该在测试里真联网）。"""
+
+    def __init__(self):
+        self.result = dict(FAKE_AI_RESULT)
+        self.mindmap = FAKE_MINDMAP
+        self.error: Exception | None = None  # 赋异常即模拟模型报错
+        self.transcript = None
+        self.title = None
+
+    def summarize(self, transcript: str, title: str) -> dict:
+        if self.error is not None:
+            raise self.error
+        self.transcript = transcript
+        self.title = title
+        return self.result
+
+    def generate_mindmap_markdown(self, summary: dict, title: str) -> str:
+        if self.error is not None:
+            raise self.error
+        return self.mindmap
+
+
+@pytest.fixture
+def stub_ai(monkeypatch):
+    """替换 AI 总结与思维导图生成；其余链路（路由编排、落库）真实执行。"""
+    from services import ai_service
+
+    stub = AiStub()
+    monkeypatch.setattr(ai_service, "summarize", stub.summarize)
+    monkeypatch.setattr(ai_service, "generate_mindmap_markdown", stub.generate_mindmap_markdown)
+    return stub
+
+
+class SubtitleStub:
+    """打桩字幕提取（yt-dlp / 平台接口属于外部世界）。"""
+
+    def __init__(self):
+        self.data = list(FAKE_SUBTITLE)
+        self.calls = []
+
+    def __call__(self, url: str, lang: str | None = None):
+        self.calls.append((url, lang))
+        return self.data
+
+
+@pytest.fixture
+def stub_subtitle(monkeypatch):
+    """替换字幕提取；data 置 None 即模拟「该视频没有字幕」。"""
+    from services import subtitle_service
+
+    stub = SubtitleStub()
+    monkeypatch.setattr(subtitle_service, "get_subtitle_data", stub)
+    return stub

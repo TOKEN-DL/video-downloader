@@ -1,9 +1,12 @@
 <script setup>
 import { ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { useDownload } from '../composables/useDownload'
 import { useSummarize } from '../composables/useSummarize'
 import { formatFileSize, formatDuration, proxyImageUrl } from '../api'
 import AiSummaryPanel from '../components/AiSummaryPanel.vue'
+
+const route = useRoute()
 
 const {
   url, loading, error, videoInfo, selectedFormat, elapsed,
@@ -21,6 +24,11 @@ const {
 } = useSummarize()
 
 const menuOpen = ref(false)
+
+// 从历史详情页「重新解析」过来时，直接把链接填好
+if (route.query.url) {
+  url.value = String(route.query.url)
+}
 
 function handleKeydown(e) {
   if (e.key === 'Enter' && canParse.value && !loading.value) {
@@ -40,7 +48,8 @@ function handlePaste(e) {
 // 解析成功后自动触发 AI 总结
 watch(videoInfo, (info) => {
   if (info && url.value) {
-    startSummarize(url.value)
+    // 带上 history_id，AI 结果直接回写这条历史记录
+    startSummarize(url.value, null, info.history_id)
   }
 })
 

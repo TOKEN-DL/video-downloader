@@ -144,6 +144,71 @@ def list_records(
     return {"total": total, "page": page, "page_size": size, "items": items}
 
 
+def attach_ai_result(
+    record_id: int,
+    subtitle_data: list | None,
+    transcript: str | None,
+    ai_result: dict | None,
+    mindmap_md: str | None,
+) -> bool:
+    """AI 总结成功后把分析数据补写到记录上，status 变为 'ai_done'。
+
+    新一轮 AI 成功 = 覆盖写入：同一 URL 通常就是同一个视频，
+    旧的分析结果没有保留价值，但状态与错误文案要一起刷新干净。
+    """
+    conn = db.get_conn()
+    cursor = conn.execute(
+        """
+        UPDATE history SET
+            subtitle_json = ?,
+            transcript    = ?,
+            ai_result     = ?,
+            mindmap_md    = ?,
+            status        = 'ai_done',
+            error         = NULL,
+            updated_at    = ?
+        WHERE id = ?
+        """,
+        (
+            json.dumps(subtitle_data or [], ensure_ascii=False),
+            transcript,
+            json.dumps(ai_result or {}, ensure_ascii=False),
+            mindmap_md or "",
+            _now(),
+            record_id,
+        ),
+    )
+    conn.commit()
+    return cursor.rowcount > 0
+
+
+def mark_ai_failed(record_id: int, error: str) -> bool:
+    """AI 总结失败时标记 status='ai_failed' 并记录失败原因。
+
+    刻意不清空已有的 AI 数据：同一个 URL 一般就是同一个视频，
+    之前跑出来的结果依然成立，不能因为一次失败就让人白跑一遍。
+    """
+    conn = db.get_conn()
+    cursor = conn.execute(
+        "UPDATE history SET status = 'ai_failed', error = ?, updated_at = ? WHERE id = ?",
+        (error, _now(), record_id),
+    )
+    conn.commit()
+    return cursor.rowcount > 0
+
+
+def get_record_by_url(url: str) -> int | None:
+    """按 url 取记录 ID（AI 总结没带 history_id 时的兜底）。找不到返回 None。"""
+    if not url:
+        return None
+    conn = db.get_conn()
+    row = conn.execute(
+        "SELECT id FROM history WHERE url = ? ORDER BY updated_at DESC, id DESC LIMIT 1",
+        (url.strip(),),
+    ).fetchone()
+    return row["id"] if row else None
+
+
 def set_thumb_path(record_id: int, thumb_path: str) -> bool:
     """回写本地封面相对路径（封面下载成功后调用）。
 

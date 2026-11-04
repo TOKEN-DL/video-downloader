@@ -28,7 +28,7 @@ export function useSummarize() {
     return String(err)
   }
 
-  async function start(url, subtitleLang) {
+  async function start(url, subtitleLang, historyId) {
     summarizeError.value = ''
     summaryResult.value = null
     summarizeStatus.value = ''
@@ -40,12 +40,47 @@ export function useSummarize() {
     summarizeLoading.value = true
 
     try {
-      const res = await startSummarize(url, subtitleLang)
+      const res = await startSummarize(url, subtitleLang, historyId)
       summarizeTaskId.value = res.task_id
       _startPolling()
     } catch (e) {
       summarizeError.value = _extractError(e)
       summarizeLoading.value = false
+    }
+  }
+
+  /**
+   * 把历史记录里的 AI 分析灌进现有状态（不触发新的 AI 任务）。
+   *
+   * 历史详情页用它展示当初跑出来的总结 / 字幕 / 思维导图；
+   * AI 问答也复用这里灌好的字幕上下文。
+   */
+  function load(record) {
+    if (!record) return
+    _stopPolling()
+    summaryResult.value = record.ai_result || null
+    transcriptText.value = record.transcript || ''
+    subtitleData.value = record.subtitle_data || []
+    mindmapMarkdown.value = record.mindmap_markdown || ''
+    videoTitle.value = record.title || ''
+    summarizeTaskId.value = ''
+    summarizeLoading.value = false
+    chatMessages.value = []
+    chatLoading.value = false
+
+    if (record.status === 'ai_failed') {
+      summarizeStatus.value = 'error'
+      summarizeMessage.value = record.error || 'AI 总结失败'
+      summarizeError.value = record.error || 'AI 总结失败'
+    } else if (record.status === 'ai_done') {
+      summarizeStatus.value = 'done'
+      summarizeMessage.value = ''
+      summarizeError.value = ''
+    } else {
+      // 只解析过、还没跑 AI
+      summarizeStatus.value = 'parsed'
+      summarizeMessage.value = 'AI 分析尚未完成'
+      summarizeError.value = ''
     }
   }
 
@@ -124,6 +159,6 @@ export function useSummarize() {
     summarizeTaskId, summarizeStatus, summarizeMessage,
     transcriptText, subtitleData, videoTitle, mindmapMarkdown,
     chatMessages, chatLoading,
-    start, chat, reset,
+    start, load, chat, reset,
   }
 }

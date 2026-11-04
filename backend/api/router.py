@@ -39,6 +39,8 @@ class DownloadRequest(BaseModel):
 class SummarizeRequest(BaseModel):
     url: str
     subtitle_lang: str | None = None
+    # 可选：AI 结果要回写到哪条历史记录。缺省时后端按 url 兜底匹配。
+    history_id: int | None = None
 
 
 class ChatRequest(BaseModel):
@@ -120,6 +122,41 @@ async def api_history_detail(record_id: int):
     if not record:
         raise HTTPException(status_code=404, detail="记录不存在")
     return record
+
+
+@router.get("/api/history/{record_id}/export")
+async def api_history_export(record_id: int, format: str = "markdown"):
+    """导出记录的 AI 总结（Markdown / PDF）。
+
+    历史记录没有内存里的 task_id，用不了 /api/ai/export/{task_id}；
+    这里按记录取 ai_result，复用同一套转换与导出逻辑。
+    """
+    record = history_service.get_record(record_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="记录不存在")
+
+    result = record.get("ai_result")
+    if not result:
+        raise HTTPException(status_code=400, detail="该记录还没有 AI 总结，无法导出")
+
+    title = record.get("title") or "视频总结"
+
+    if format == "pdf":
+        from services.export_service import generate_pdf
+        pdf_bytes = generate_pdf(result, title)
+        return StreamingResponse(
+            io.BytesIO(pdf_bytes),
+            media_type="application/pdf",
+            headers={"Content-Disposition": _content_disposition(f"{title[:50]}.pdf")},
+        )
+
+    # Default: markdown
+    md_content = _result_to_markdown(result, title)
+    return StreamingResponse(
+        io.BytesIO(md_content.encode("utf-8")),
+        media_type="text/markdown",
+        headers={"Content-Disposition": _content_disposition(f"{title[:50]}.md")},
+    )
 
 
 @router.get("/api/history/thumb/{record_id}")
@@ -228,8 +265,11 @@ async def api_proxy_image(url: str):
 
 # ============ AI Summarization Endpoints ============
 
-def _summarize_worker(task_id: str, url: str, subtitle_lang: str | None):
-    """Worker thread for AI summarization."""
+def _summarize_worker(task_id: str, url: str, subtitle_lang: str | None, record_id: int | None = None):
+    """Worker thread for AI summarization.
+
+    record_id 指向要回写的历史记录；为 None 时只跑 AI，不写库。
+    """
     try:
         ai_task_progress[task_id]["status"] = "transcribing"
         ai_task_progress[task_id]["message"] = "正在提取字幕..."
@@ -242,10 +282,7 @@ def _summarize_worker(task_id: str, url: str, subtitle_lang: str | None):
         subtitle_data = subtitle_service.get_subtitle_data(url, subtitle_lang)
         transcript = "\n".join(item["text"] for item in subtitle_data) if subtitle_data else None
         if not transcript or not transcript.strip():
-            ai_task_progress[task_id].update({
-                "status": "error",
-                "error": "该视频没有字幕，暂不支持 AI 总结",
-            })
+            _fail_ai_task(task_id, record_id, "该视频没有字幕，暂不支持 AI 总结")
             return
 
         ai_task_progress[task_id].update({
@@ -262,24 +299,68 @@ def _summarize_worker(task_id: str, url: str, subtitle_lang: str | None):
         # 4. Generate mindmap markdown
         mindmap_md = ai_service.generate_mindmap_markdown(result, title)
 
-        ai_task_progress[task_id].update({
-            "status": "done",
-            "result": result,
-            "mindmap_markdown": mindmap_md,
-        })
+        _done_ai_task(task_id, record_id, subtitle_data, transcript, result, mindmap_md)
 
     except Exception as e:
         logger.error(f"[{task_id}] AI 总结失败: {e}")
-        ai_task_progress[task_id].update({
-            "status": "error",
-            "error": f"AI 总结失败: {str(e)}",
-        })
+        _fail_ai_task(task_id, record_id, f"AI 总结失败: {str(e)}")
+
+
+def _done_ai_task(task_id, record_id, subtitle_data, transcript, result, mindmap_md):
+    """AI 成功：先把结果写回历史记录，再把任务标记为完成。
+
+    先写库后置状态：轮询看到 done 的那一刻，数据已经在库里了。
+    """
+    if record_id is not None:
+        try:
+            history_service.attach_ai_result(
+                record_id, subtitle_data, transcript, result, mindmap_md
+            )
+        except Exception as e:
+            logger.error(f"[{task_id}] AI 结果入库失败（record={record_id}）: {type(e).__name__}: {e}")
+
+    ai_task_progress[task_id].update({
+        "status": "done",
+        "result": result,
+        "mindmap_markdown": mindmap_md,
+    })
+
+
+def _fail_ai_task(task_id, record_id, error):
+    """AI 失败：记录标记为 ai_failed 并保留失败原因，任务状态置为 error。"""
+    if record_id is not None:
+        try:
+            history_service.mark_ai_failed(record_id, error)
+        except Exception as e:
+            logger.error(f"[{task_id}] AI 失败状态落库失败（record={record_id}）: {type(e).__name__}: {e}")
+
+    ai_task_progress[task_id].update({
+        "status": "error",
+        "error": error,
+    })
+
+
+def _resolve_record_id(history_id: int | None, url: str) -> int | None:
+    """确定 AI 结果回写到哪条记录。
+
+    有 history_id 就用它；没有就按 url 兜底匹配最近一条记录，
+    匹配不到就不写库（不影响 AI 任务本身）。
+    """
+    if history_id is not None:
+        return history_id
+    try:
+        return history_service.get_record_by_url(url)
+    except Exception as e:
+        logger.error(f"按 url 匹配历史记录失败（{url}）: {type(e).__name__}: {e}")
+        return None
 
 
 @router.post("/api/ai/summarize")
 async def api_ai_summarize(req: SummarizeRequest):
     if not req.url.strip():
         raise HTTPException(status_code=400, detail="URL不能为空")
+
+    record_id = _resolve_record_id(req.history_id, req.url)
 
     task_id = uuid.uuid4().hex[:12]
     ai_task_progress[task_id] = {
@@ -294,7 +375,7 @@ async def api_ai_summarize(req: SummarizeRequest):
 
     t = threading.Thread(
         target=_summarize_worker,
-        args=(task_id, req.url, req.subtitle_lang),
+        args=(task_id, req.url, req.subtitle_lang, record_id),
         daemon=True,
     )
     t.start()
