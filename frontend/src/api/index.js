@@ -119,3 +119,30 @@ export async function listHistory(page = 1, pageSize = 20) {
   }
   return res.json()
 }
+
+export async function getHistory(id) {
+  const res = await fetch(`${BASE}/api/history/${id}`)
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(_extractDetail(err) || '获取记录详情失败')
+  }
+  return res.json()
+}
+
+export async function deleteHistory(id) {
+  const res = await fetch(`${BASE}/api/history/${id}`, { method: 'DELETE' })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(_extractDetail(err) || '删除记录失败')
+  }
+  return res.json()
+}
+
+export async function clearHistory() {
+  const res = await fetch(`${BASE}/api/history`, { method: 'DELETE' })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(_extractDetail(err) || '清空历史记录失败')
+  }
+  return res.json()
+}

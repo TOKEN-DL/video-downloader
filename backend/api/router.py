@@ -84,6 +84,33 @@ async def api_history_list(
     )
 
 
+@router.get("/api/history/{record_id}")
+async def api_history_detail(record_id: int):
+    """记录详情：含格式列表与字幕 / AI 数据。
+
+    路由声明在 /api/history 之后、/api/history/thumb/{id} 之前不会冲突：
+    {record_id} 是 int，匹配不到非数字路径。
+    """
+    record = history_service.get_record(record_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="记录不存在")
+    return record
+
+
+@router.delete("/api/history/{record_id}")
+async def api_history_delete(record_id: int):
+    """删除单条记录（连同它缓存的本地封面文件）。"""
+    if not history_service.delete_record(record_id):
+        raise HTTPException(status_code=404, detail="记录不存在")
+    return {"deleted": True}
+
+
+@router.delete("/api/history")
+async def api_history_clear():
+    """清空全部历史记录（连同它们缓存的本地封面文件）。"""
+    return {"deleted": history_service.clear_records()}
+
+
 @router.post("/api/download")
 async def api_download(req: DownloadRequest):
     if not req.url.strip():

@@ -64,6 +64,10 @@ DB_PATH = os.path.join(os.path.dirname(__file__), "history.db")
 # 历史记录列表默认每页条数（前端「加载更多」按此翻页）
 HISTORY_PAGE_SIZE_DEFAULT = 20
 
+# 历史记录封面本地缓存目录。封面由封面缓存那张票写入，
+# 删除记录 / 清空全部时同步清理，避免留下孤儿文件。
+HISTORY_THUMB_DIR = os.path.join(os.path.dirname(__file__), "history", "thumbs")
+
 # Auto-detect ffmpeg location
 # 查找优先级: FFMPEG_PATH 环境变量 > PATH > 常见安装目录
 # 注意: 必须返回绝对路径。yt-dlp 的 ffmpeg_location 只做 os.path.exists 判断，
@@ -211,6 +215,7 @@ BILIBILI_SESSDATA = os.getenv("BILIBILI_SESSDATA", "")
 
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 os.makedirs(SUBTITLE_DIR, exist_ok=True)
+os.makedirs(HISTORY_THUMB_DIR, exist_ok=True)
 
 # ============ 应用日志 ============
 # uvicorn 热重载会重建子进程，stdout/stderr 句柄随之丢失，日志只留下启动那几行。
