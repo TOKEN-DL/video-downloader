@@ -126,6 +126,44 @@ def parse_video(url: str) -> dict:
     return result
 
 
+def _cached_parse_result(url: str) -> dict | None:
+    """取解析缓存里仍然有效的结果；没缓存或已过期返回 None。"""
+    if config.PARSE_CACHE_TTL <= 0:
+        return None
+    entry = _parse_cache.get(url)
+    if not entry:
+        return None
+    if (time.time() - entry[0]) >= config.PARSE_CACHE_TTL:
+        return None
+    return entry[1]
+
+
+def resolve_download_source(url: str, format_id: str) -> tuple[str, str | None]:
+    """判定这个视频该走直链下载还是 yt-dlp 下载。
+
+    返回 (mode, direct_url)：mode 为 'direct'（直链下载）或 'yt-dlp'。
+    format_id 只在 yt-dlp 分支有意义（由调用方传给 start_download），
+    直链下载整条视频只有一档清晰度。
+
+    判定顺序：
+      1. 命中内存解析缓存且结果带 _fallback → 直链
+      2. 否则重新解析一次（缓存有效则秒回，否则走网络）→ 带 _fallback → 直链
+      3. 其余情况 → yt-dlp
+
+    第 2 步是关键：服务重启后内存缓存是空的，重新解析能拿到新的签名直链，
+    「重启后抖音下载必然失败」这个缺陷因此消失。首页下载与历史记录下载共用它。
+    """
+    cached = _cached_parse_result(url)
+    if cached and cached.get("_fallback"):
+        return "direct", cached.get("_video_url") or ""
+
+    result = parse_video(url)
+    if result.get("_fallback"):
+        return "direct", result.get("_video_url") or ""
+
+    return "yt-dlp", None
+
+
 def _parse_uncached(url: str) -> dict:
     try:
         return _parse_with_ytdlp(url)

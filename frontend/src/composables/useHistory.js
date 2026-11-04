@@ -1,5 +1,5 @@
 import { ref, computed } from 'vue'
-import { listHistory, getHistory, deleteHistory, clearHistory } from '../api'
+import { listHistory, getHistory, deleteHistory, clearHistory, downloadHistory } from '../api'
 
 const PAGE_SIZE = 20
 
@@ -13,6 +13,8 @@ export function useHistory() {
 
   const detail = ref(null)
   const detailLoading = ref(false)
+  // 下载失败单独放：error 是列表 / 详情的加载错误，两者不能混
+  const downloadError = ref('')
 
   const hasMore = computed(() => items.value.length < total.value)
 
@@ -80,6 +82,19 @@ export function useHistory() {
     }
   }
 
+  // 从历史记录重新下载：服务端用记录里的链接与清晰度重新走网络下载。
+  // 成功返回 task_id，失败把原因写进 downloadError 并返回 null。
+  async function startDownload(id, formatId) {
+    downloadError.value = ''
+    try {
+      const res = await downloadHistory(id, formatId)
+      return res.task_id
+    } catch (e) {
+      downloadError.value = e.message
+      return null
+    }
+  }
+
   // 清空全部
   async function clearAll() {
     error.value = ''
@@ -97,7 +112,7 @@ export function useHistory() {
   return {
     items, total, page, hasMore,
     loading, loadingMore, error,
-    detail, detailLoading,
-    load, loadMore, loadDetail, remove, clearAll,
+    detail, detailLoading, downloadError,
+    load, loadMore, loadDetail, remove, clearAll, startDownload,
   }
 }

@@ -23,9 +23,6 @@ ai_task_progress: dict = {}
 
 router = APIRouter()
 
-# Cache parsed video info for fallback downloads
-_parsed_cache: dict = {}
-
 
 class ParseRequest(BaseModel):
     url: str
@@ -34,6 +31,10 @@ class ParseRequest(BaseModel):
 class DownloadRequest(BaseModel):
     url: str
     format_id: str
+
+
+class HistoryDownloadRequest(BaseModel):
+    format_id: str | None = None
 
 
 class SummarizeRequest(BaseModel):
@@ -54,8 +55,6 @@ async def api_parse(req: ParseRequest):
     try:
         url = req.url.strip()
         result = await asyncio.to_thread(video_service.parse_video, url)
-        if result.get("_fallback"):
-            _parsed_cache[url] = result
         # 解析成功即入库。落库失败（磁盘满等）只记日志，不阻断主流程：
         # 历史记录是辅助能力，解析结果照常返回（仅少一个 history_id）。
         try:
@@ -122,6 +121,85 @@ async def api_history_detail(record_id: int):
     return record
 
 
+_RESOLUTION_RE = re.compile(r"(\d+)")
+
+
+def _resolution_height(resolution) -> int | None:
+    """把分辨率标签解析成像素高度；解析不出来（如抖音的 'best'）返回 None。"""
+    text = str(resolution or "").strip().lower()
+    if not text:
+        return None
+    if "x" in text:  # 1920x1080 → 取高度那一半
+        text = text.rsplit("x", 1)[-1]
+    m = _RESOLUTION_RE.search(text)
+    return int(m.group(1)) if m else None
+
+
+def _pick_best_format(formats: list) -> str:
+    """挑分辨率最高的一档；分辨率没法比较（如抖音的 'best'）时取第一档。"""
+    best_id = ""
+    best_height = -1
+    for fmt in formats or []:
+        if not isinstance(fmt, dict):
+            continue
+        format_id = str(fmt.get("format_id") or "").strip()
+        if not format_id:
+            continue
+        height = _resolution_height(fmt.get("resolution"))
+        if height is None:
+            # 高度不可比：先占个位，遇到可比的就让位
+            if not best_id:
+                best_id = format_id
+            continue
+        if height > best_height:
+            best_height = height
+            best_id = format_id
+    return best_id
+
+
+@router.post("/api/history/{record_id}/download")
+async def api_history_download(record_id: int, req: HistoryDownloadRequest | None = None):
+    """从历史记录重新下载：用记录里的链接与清晰度重新走一遍网络下载。
+
+    与首页下载共用同一套「拿下载地址」的判定，交互也完全一致：
+    返回 task_id，前端用现有的 /api/download/status 与 /api/download/file 取进度和文件。
+    """
+    record = history_service.get_record(record_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="记录不存在")
+
+    url = (record.get("url") or "").strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="该记录缺少视频链接")
+
+    format_id = ((req.format_id if req else None) or "").strip()
+    if not format_id:
+        # 没指定清晰度就用记录里分辨率最高的一档
+        format_id = _pick_best_format(record.get("formats") or [])
+    if not format_id:
+        raise HTTPException(status_code=400, detail="该记录没有可用的清晰度")
+
+    # 走直链还是走 yt-dlp：和首页下载共用同一套判定
+    try:
+        mode, direct_url = await asyncio.to_thread(
+            video_service.resolve_download_source, url, format_id
+        )
+    except Exception as e:
+        # 源失效（视频下架 / 链接过期）：给出明确提示。这条历史记录不动，
+        # 用户还能查详情、自己删。
+        raise HTTPException(
+            status_code=400,
+            detail=f"视频源已失效或无法解析: {type(e).__name__}: {e}",
+        )
+    if mode == "direct":
+        if not direct_url:
+            raise HTTPException(status_code=400, detail="无可用下载链接")
+        task_id = video_service.start_fallback_download(direct_url)
+    else:
+        task_id = video_service.start_download(url, format_id)
+    return {"task_id": task_id}
+
+
 @router.get("/api/history/thumb/{record_id}")
 async def api_history_thumb(record_id: int):
     """本地缓存的封面。文件不存在返回 404，前端回退远程代理图。"""
@@ -155,13 +233,22 @@ async def api_download(req: DownloadRequest):
         raise HTTPException(status_code=400, detail="URL不能为空")
 
     try:
-        # Check if this is a fallback (Evil0ctal) parse result
-        cached = _parsed_cache.get(req.url)
-        if cached and cached.get("_fallback"):
-            video_url = cached.get("_video_url", "")
-            if not video_url:
+        # 走直链还是走 yt-dlp：与历史记录下载共用同一套判定。
+        # 判定里会重新解析一次，服务重启后抖音视频照样能拿到新直链。
+        mode, direct_url = await asyncio.to_thread(
+            video_service.resolve_download_source, req.url, req.format_id
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"视频源已失效或无法解析: {type(e).__name__}: {e}",
+        )
+
+    try:
+        if mode == "direct":
+            if not direct_url:
                 raise HTTPException(status_code=400, detail="无可用下载链接")
-            task_id = video_service.start_fallback_download(video_url)
+            task_id = video_service.start_fallback_download(direct_url)
             return {"task_id": task_id}
 
         # Normal yt-dlp download

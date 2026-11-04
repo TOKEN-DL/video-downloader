@@ -2,22 +2,54 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useHistory } from '../composables/useHistory'
+import { useDownload } from '../composables/useDownload'
 import HistoryThumb from '../components/HistoryThumb.vue'
-import { formatFileSize, formatDuration } from '../api'
+import { formatFileSize, formatDuration, pickBestFormat } from '../api'
 
 const route = useRoute()
 
-const { detail, detailLoading, error, loadDetail } = useHistory()
+const { detail, detailLoading, error, loadDetail, startDownload, downloadError } = useHistory()
+const {
+  status, progress, speed, downloaded, total, eta, fileUrl,
+  isDone, isDownloading, isStarting, error: downloadTaskError,
+  track,
+} = useDownload()
 
-// 清晰度选择：默认选中第一档
+// 清晰度选择：默认选中分辨率最高的一档
 const selectedFormat = ref('')
 const formats = computed(() => detail.value?.formats || [])
 
 watch(formats, (list) => {
-  if (list.length && !list.some(f => f.format_id === selectedFormat.value)) {
-    selectedFormat.value = list[0].format_id
+  if (!list.length) {
+    selectedFormat.value = ''
+    return
   }
-})
+  if (!list.some(f => f.format_id === selectedFormat.value)) {
+    selectedFormat.value = pickBestFormat(list)
+  }
+}, { immediate: true })
+
+// 启动下载要重新解析一次（抖音要重新拿签名直链），可能要十几秒
+const preparing = ref(false)
+const isPreparing = computed(() => preparing.value || isStarting.value)
+
+// 启动失败（视频源失效等）与下载过程出错都算下载失败
+const downloadErrorMessage = computed(() => downloadError.value || downloadTaskError.value)
+
+async function handleDownload() {
+  if (isPreparing.value || !detail.value) return
+  preparing.value = true
+  try {
+    // 没选中就用记录里分辨率最高的一档
+    const formatId = selectedFormat.value || pickBestFormat(formats.value)
+    const taskId = await startDownload(detail.value.id, formatId)
+    if (taskId) {
+      track(taskId)
+    }
+  } finally {
+    preparing.value = false
+  }
+}
 
 onMounted(() => loadDetail(route.params.id))
 </script>
@@ -133,6 +165,73 @@ onMounted(() => loadDetail(route.params.id))
                 </button>
               </div>
               <p v-else class="text-xs text-[#86868b] py-2">这条记录没有可用的清晰度信息。</p>
+            </div>
+
+            <!-- Download Action -->
+            <div class="px-4 pb-4">
+              <div v-if="!isDone && !isDownloading">
+                <button
+                  @click="handleDownload"
+                  :disabled="!formats.length || isPreparing"
+                  class="w-full py-3.5 bg-[#0071e3] text-white font-semibold rounded-xl text-sm
+                         hover:bg-[#0077ed] active:bg-[#0071e3] active:scale-[0.99]
+                         disabled:opacity-30 disabled:cursor-not-allowed
+                         transition-all shadow-sm"
+                >
+                  {{ isPreparing ? '正在准备下载...' : '开始下载' }}
+                </button>
+              </div>
+
+              <!-- Progress -->
+              <div v-if="isDownloading" class="space-y-3">
+                <div class="relative h-1.5 bg-[#f5f5f7] rounded-full overflow-hidden">
+                  <div
+                    class="absolute inset-y-0 left-0 bg-[#0071e3] rounded-full transition-all duration-700 ease-out progress-glow"
+                    :style="{ width: `${progress}%` }"
+                  />
+                </div>
+                <div class="flex justify-between items-center text-xs">
+                  <span class="text-[#1d1d1f] font-semibold tabular-nums">{{ progress }}%</span>
+                  <div class="flex items-center gap-2 text-[#86868b] text-[10px]">
+                    <span v-if="speed">{{ speed }}</span>
+                    <span v-if="total">{{ formatFileSize(downloaded) }} / {{ formatFileSize(total) }}</span>
+                    <span v-if="eta">剩余 {{ eta }}s</span>
+                  </div>
+                </div>
+                <p class="text-center text-xs text-[#86868b] flex items-center justify-center gap-1.5">
+                  <svg v-if="status === 'merging'" class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                  </svg>
+                  {{ status === 'merging' ? '正在合并音视频...' : '下载中...' }}
+                </p>
+              </div>
+
+              <!-- Done -->
+              <div v-if="isDone" class="text-center space-y-3">
+                <div class="w-10 h-10 mx-auto bg-green-50 rounded-full flex items-center justify-center">
+                  <svg class="w-5 h-5 text-green-500" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
+                  </svg>
+                </div>
+                <a
+                  :href="fileUrl"
+                  download
+                  class="inline-flex items-center gap-2 px-6 py-3 bg-[#0071e3] text-white font-semibold rounded-xl
+                         hover:bg-[#0077ed] active:scale-[0.98] transition-all text-sm shadow-sm"
+                >
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round"
+                          d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+                  </svg>
+                  保存到本地
+                </a>
+              </div>
+
+              <!-- Error -->
+              <p v-if="downloadErrorMessage" class="mt-3 text-xs text-red-600 text-center leading-relaxed">
+                下载失败：{{ downloadErrorMessage }}
+              </p>
             </div>
           </div>
 

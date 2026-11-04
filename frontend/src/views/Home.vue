@@ -8,7 +8,7 @@ import AiSummaryPanel from '../components/AiSummaryPanel.vue'
 const {
   url, loading, error, videoInfo, selectedFormat, elapsed,
   status, progress, speed, downloaded, total, eta, fileUrl,
-  canParse, canDownload, isDone, isDownloading,
+  canParse, canDownload, isDone, isDownloading, isStarting,
   parse, download, reset: resetDownload,
 } = useDownload()
 
@@ -230,13 +230,13 @@ function handleReset() {
               <div v-if="!isDone && !isDownloading">
                 <button
                   @click="download"
-                  :disabled="!canDownload"
+                  :disabled="!canDownload || isStarting"
                   class="w-full py-3.5 bg-[#0071e3] text-white font-semibold rounded-xl text-sm
                          hover:bg-[#0077ed] active:bg-[#0071e3] active:scale-[0.99]
                          disabled:opacity-30 disabled:cursor-not-allowed
                          transition-all shadow-sm"
                 >
-                  开始下载
+                  {{ isStarting ? '正在准备下载...' : '开始下载' }}
                 </button>
               </div>
 
