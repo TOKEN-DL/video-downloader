@@ -119,3 +119,8 @@ export async function listHistory(page = 1, pageSize = 20) {
   }
   return res.json()
 }
+
+// 本地缓存的封面（封面 URL 带签名会过期，历史页优先读本地这张）
+export function getHistoryThumbUrl(recordId) {
+  return `${BASE}/api/history/thumb/${recordId}`
+}

@@ -61,6 +61,11 @@ DOWNLOAD_DIR = os.path.join(os.path.dirname(__file__), "downloads")
 SUBTITLE_DIR = os.path.join(os.path.dirname(__file__), "subtitles")
 DB_PATH = os.path.join(os.path.dirname(__file__), "history.db")
 
+# 历史记录封面本地缓存目录。抖音 / B 站封面 URL 带签名会过期，
+# 缓存到本地后，隔几天回看历史记录也不会裂图。
+HISTORY_DIR = os.path.join(os.path.dirname(__file__), "history")
+HISTORY_THUMB_DIR = os.path.join(HISTORY_DIR, "thumbs")
+
 # 历史记录列表默认每页条数（前端「加载更多」按此翻页）
 HISTORY_PAGE_SIZE_DEFAULT = 20
 
