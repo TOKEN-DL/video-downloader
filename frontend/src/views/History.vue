@@ -2,7 +2,8 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useHistory } from '../composables/useHistory'
-import { formatDuration, proxyImageUrl } from '../api'
+import HistoryThumb from '../components/HistoryThumb.vue'
+import { formatDuration } from '../api'
 
 const router = useRouter()
 
@@ -169,13 +170,8 @@ onMounted(load)
             class="card-hover bg-white rounded-2xl border border-gray-100 shadow-lg overflow-hidden cursor-pointer"
           >
             <div class="relative w-full aspect-video bg-gray-100 overflow-hidden">
-              <img
-                v-if="item.thumbnail"
-                :src="proxyImageUrl(item.thumbnail)"
-                alt=""
-                class="w-full h-full object-cover"
-                @error="($event.target).style.display = 'none'"
-              />
+              <!-- 封面优先读本地缓存，取不到自动回退远程代理图 -->
+              <HistoryThumb :record="item" alt="" class="w-full h-full object-cover" />
               <div class="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent"></div>
               <div v-if="item.duration"
                    class="absolute bottom-2 right-2 bg-black/70 text-white text-[10px] px-1.5 py-0.5 rounded-md backdrop-blur-sm">

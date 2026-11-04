@@ -7,12 +7,12 @@
 """
 import json
 import logging
-import os
 from datetime import datetime
 
 import config
 from database import db
 from database.models import HISTORY_LIST_COLUMNS
+from services import thumb_service
 
 logger = logging.getLogger("history_service")
 
@@ -97,83 +97,6 @@ def get_record(record_id: int) -> dict | None:
     return record
 
 
-def _thumb_file_candidates(thumb_path: str) -> list[str]:
-    """封面文件的可能位置。
-
-    thumb_path 存的是相对路径，写入方（封面缓存那张票）可能记 '12.jpg'，
-    也可能记 'thumbs/12.jpg'，两种写法都兜住，免得删不掉留下孤儿文件。
-    绝对路径原样使用；相对路径只接受落在封面目录内的位置。
-    """
-    if not thumb_path:
-        return []
-    if os.path.isabs(thumb_path):
-        return [thumb_path]
-
-    base = os.path.abspath(config.HISTORY_THUMB_DIR)
-    candidates = [
-        os.path.join(base, os.path.basename(thumb_path)),
-        os.path.join(base, thumb_path),
-    ]
-    safe = []
-    for path in candidates:
-        resolved = os.path.abspath(path)
-        if resolved.startswith(base + os.sep):
-            safe.append(resolved)
-    return safe
-
-
-def _remove_thumb_files(thumb_path: str) -> None:
-    """删掉某条记录缓存的封面文件。删不掉只记日志，不影响删除记录本身。"""
-    for path in _thumb_file_candidates(thumb_path):
-        try:
-            if os.path.isfile(path):
-                os.remove(path)
-        except OSError as e:
-            logger.warning(f"删除封面文件失败 ({path}): {e}")
-
-
-def _sweep_thumb_dir() -> None:
-    """清空记录后，封面目录里剩下的文件都是孤儿，一并清掉。"""
-    base = config.HISTORY_THUMB_DIR
-    if not os.path.isdir(base):
-        return
-    for name in os.listdir(base):
-        path = os.path.join(base, name)
-        try:
-            if os.path.isfile(path):
-                os.remove(path)
-        except OSError as e:
-            logger.warning(f"删除封面文件失败 ({path}): {e}")
-
-
-def delete_record(record_id: int) -> bool:
-    """删除单条记录，并清掉它缓存的本地封面。记录不存在返回 False。"""
-    conn = db.get_conn()
-    row = conn.execute(
-        "SELECT thumb_path FROM history WHERE id = ?", (record_id,)
-    ).fetchone()
-    if row is None:
-        return False
-
-    conn.execute("DELETE FROM history WHERE id = ?", (record_id,))
-    conn.commit()
-    _remove_thumb_files(row["thumb_path"])
-    return True
-
-
-def clear_records() -> int:
-    """清空全部记录，并清掉所有本地封面文件。返回删除条数。"""
-    conn = db.get_conn()
-    rows = conn.execute("SELECT thumb_path FROM history").fetchall()
-    conn.execute("DELETE FROM history")
-    conn.commit()
-
-    for row in rows:
-        _remove_thumb_files(row["thumb_path"])
-    _sweep_thumb_dir()
-    return len(rows)
-
-
 def list_records(
     page: int = 1,
     page_size: int | None = None,
@@ -219,3 +142,63 @@ def list_records(
         items.append(item)
 
     return {"total": total, "page": page, "page_size": size, "items": items}
+
+
+def set_thumb_path(record_id: int, thumb_path: str) -> bool:
+    """回写本地封面相对路径（封面下载成功后调用）。
+
+    下载失败时 thumb_path 留空，前端回退远程封面代理图。
+    """
+    conn = db.get_conn()
+    conn.execute(
+        "UPDATE history SET thumb_path = ?, updated_at = ? WHERE id = ?",
+        (thumb_path, _now(), record_id),
+    )
+    conn.commit()
+    return True
+
+
+def delete_thumb(record_id: int) -> bool:
+    """删除单条记录的本地封面文件。
+
+    与记录删除解耦，供删除流程直接调用；记录本身已不存在时也照删文件。
+    """
+    conn = db.get_conn()
+    row = conn.execute(
+        "SELECT thumb_path FROM history WHERE id = ?", (record_id,)
+    ).fetchone()
+    stored = row["thumb_path"] if row else None
+    return thumb_service.delete_thumb(record_id, stored)
+
+
+def clear_thumbs() -> int:
+    """删除全部本地封面文件，返回删除数量。"""
+    return thumb_service.clear_thumbs()
+
+
+def delete_record(record_id: int) -> bool:
+    """删除单条记录，并清理它对应的本地封面文件。
+
+    返回是否真的删掉了记录（记录不存在返回 False）。
+    """
+    conn = db.get_conn()
+    row = conn.execute(
+        "SELECT thumb_path FROM history WHERE id = ?", (record_id,)
+    ).fetchone()
+    if row is None:
+        return False
+
+    conn.execute("DELETE FROM history WHERE id = ?", (record_id,))
+    conn.commit()
+    thumb_service.delete_thumb(record_id, row["thumb_path"])
+    return True
+
+
+def clear_records() -> int:
+    """清空全部记录，并清理所有本地封面文件。返回删除的记录数。"""
+    conn = db.get_conn()
+    cursor = conn.execute("DELETE FROM history")
+    conn.commit()
+    deleted = cursor.rowcount if cursor.rowcount and cursor.rowcount > 0 else 0
+    clear_thumbs()
+    return deleted

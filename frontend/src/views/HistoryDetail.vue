@@ -2,7 +2,8 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useHistory } from '../composables/useHistory'
-import { formatFileSize, formatDuration, proxyImageUrl } from '../api'
+import HistoryThumb from '../components/HistoryThumb.vue'
+import { formatFileSize, formatDuration } from '../api'
 
 const route = useRoute()
 
@@ -89,13 +90,8 @@ onMounted(() => loadDetail(route.params.id))
           <div class="lg:col-span-2 bg-white rounded-2xl border border-gray-100 shadow-lg overflow-hidden self-start">
             <!-- Cover -->
             <div class="relative w-full aspect-video bg-gray-100 overflow-hidden">
-              <img
-                v-if="detail.thumbnail"
-                :src="proxyImageUrl(detail.thumbnail)"
-                alt=""
-                class="w-full h-full object-cover"
-                @error="($event.target).style.display = 'none'"
-              />
+              <!-- 封面优先读本地缓存，取不到自动回退远程代理图 -->
+              <HistoryThumb v-if="detail.thumbnail || detail.thumb_path" :record="detail" alt="" class="w-full h-full object-cover" />
               <div class="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent"></div>
               <div v-if="detail.duration"
                    class="absolute bottom-2 right-2 bg-black/70 text-white text-[10px] px-1.5 py-0.5 rounded-md backdrop-blur-sm">

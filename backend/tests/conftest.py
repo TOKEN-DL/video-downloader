@@ -1,12 +1,15 @@
 """pytest 公共夹具。
 
 测试只走 HTTP API 这一条接缝，用真实的 FastAPI 应用打真实的 SQLite，
-只把「外部世界」（yt-dlp 解析、字幕提取、AI 总结、下载任务）打桩。
+只把「外部世界」（yt-dlp 解析、字幕提取、AI 总结、封面下载、下载任务）打桩。
 
-数据库路径在运行时指向临时目录，绝不触碰真实的 backend/history.db。
+数据库路径与封面缓存目录在运行时指向临时目录，绝不触碰真实的
+backend/history.db 和 backend/history/thumbs。
 """
 import os
 import sys
+import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -55,8 +58,16 @@ def temp_db(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def client(temp_db):
-    """指向临时库的真实应用客户端。"""
+def temp_thumbs(tmp_path, monkeypatch):
+    """把封面缓存目录指向临时目录，绝不碰真实的 backend/history/thumbs。"""
+    thumb_dir = tmp_path / "thumbs"
+    monkeypatch.setattr(config, "HISTORY_THUMB_DIR", str(thumb_dir))
+    return thumb_dir
+
+
+@pytest.fixture
+def client(temp_db, temp_thumbs):
+    """指向临时库 / 临时封面目录的真实应用客户端。"""
     from fastapi.testclient import TestClient
     from main import app
 
@@ -72,3 +83,65 @@ def stub_parse(monkeypatch):
     stub = ParseStub()
     monkeypatch.setattr(router.video_service, "parse_video", stub)
     return stub
+
+
+# ============ 封面下载打桩 ============
+
+FAKE_IMAGE = b"\xff\xd8\xff\xe0\x00\x10JFIF" + b"fake-jpeg-bytes"
+
+
+class FakeThumbResponse:
+    """httpx.Response 的最小替身。"""
+
+    def __init__(self, content: bytes = b"", status_code: int = 200,
+                 content_type: str = "image/jpeg"):
+        self.content = content
+        self.status_code = status_code
+        self.headers = {"content-type": content_type}
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise RuntimeError(f"HTTP {self.status_code}")
+
+
+class FakeThumbClient:
+    """打桩封面下载（httpx 属于外部世界，测试里不该真联网）。"""
+
+    def __init__(self, content: bytes = FAKE_IMAGE):
+        self.content = content
+        self.requests: list[dict] = []
+        self.finished = False
+        self.error: Exception | None = None  # 赋异常即模拟防盗链 / 超时 / 404
+
+    def __call__(self, **kwargs):
+        return self
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def get(self, url, headers=None):
+        self.requests.append({"url": url, "headers": dict(headers or {})})
+        try:
+            if self.error is not None:
+                raise self.error
+            return FakeThumbResponse(content=self.content)
+        finally:
+            self.finished = True
+
+
+@pytest.fixture
+def stub_thumb_download(monkeypatch):
+    """替换封面下载用的 httpx.Client（只影响 thumb_service，不动全局 httpx）。"""
+    from services import thumb_service
+
+    stub = FakeThumbClient()
+    monkeypatch.setattr(thumb_service, "httpx", SimpleNamespace(Client=stub))
+    yield stub
+    # 后台线程可能还在下载：等它这次请求结束，避免补丁撤销后线程去真联网
+    if stub.requests:
+        deadline = time.time() + 5
+        while not stub.finished and time.time() < deadline:
+            time.sleep(0.05)
