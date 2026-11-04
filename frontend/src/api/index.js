@@ -107,3 +107,15 @@ export async function sendChatMessage(messages, transcriptContext) {
 export function getExportUrl(taskId, format) {
   return `${BASE}/api/ai/export/${taskId}?format=${format}`
 }
+
+// ============ 历史记录 ============
+
+export async function listHistory(page = 1, pageSize = 20) {
+  const query = new URLSearchParams({ page, page_size: pageSize })
+  const res = await fetch(`${BASE}/api/history?${query}`)
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(_extractDetail(err) || '获取历史记录失败')
+  }
+  return res.json()
+}
