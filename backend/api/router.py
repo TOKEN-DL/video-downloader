@@ -9,8 +9,9 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel
 import config
-from services.video_service import parse_video, start_download, start_fallback_download, get_status, get_filepath
-from services.subtitle_service import get_subtitle_text, get_subtitle_data
+from services import video_service
+from services import subtitle_service
+from services import history_service
 from services import ai_service
 import httpx
 
@@ -49,12 +50,38 @@ async def api_parse(req: ParseRequest):
     if not req.url.strip():
         raise HTTPException(status_code=400, detail="URL不能为空")
     try:
-        result = await asyncio.to_thread(parse_video, req.url)
+        url = req.url.strip()
+        result = await asyncio.to_thread(video_service.parse_video, url)
         if result.get("_fallback"):
-            _parsed_cache[req.url] = result
+            _parsed_cache[url] = result
+        # 解析成功即入库。落库失败（磁盘满等）只记日志，不阻断主流程：
+        # 历史记录是辅助能力，解析结果照常返回（仅少一个 history_id）。
+        try:
+            history_id = history_service.upsert_parsed(url, result)
+        except Exception as e:
+            logger.error(f"历史记录落库失败（{url}）: {type(e).__name__}: {e}")
+            history_id = None
+        if history_id is not None:
+            result = {**result, "history_id": history_id}
         return result
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"解析失败: {str(e)}")
+
+
+@router.get("/api/history")
+async def api_history_list(
+    page: int = 1,
+    page_size: int | None = None,
+    platform: str | None = None,
+    keyword: str | None = None,
+):
+    """历史记录分页列表。items 不含字幕 / AI 大字段，保证接口轻量。"""
+    return history_service.list_records(
+        page=page,
+        page_size=page_size,
+        platform=platform,
+        keyword=keyword,
+    )
 
 
 @router.post("/api/download")
@@ -69,13 +96,13 @@ async def api_download(req: DownloadRequest):
             video_url = cached.get("_video_url", "")
             if not video_url:
                 raise HTTPException(status_code=400, detail="无可用下载链接")
-            task_id = start_fallback_download(video_url)
+            task_id = video_service.start_fallback_download(video_url)
             return {"task_id": task_id}
 
         # Normal yt-dlp download
         if not req.format_id.strip():
             raise HTTPException(status_code=400, detail="format_id不能为空")
-        task_id = start_download(req.url, req.format_id)
+        task_id = video_service.start_download(req.url, req.format_id)
         return {"task_id": task_id}
     except HTTPException:
         raise
@@ -85,7 +112,7 @@ async def api_download(req: DownloadRequest):
 
 @router.get("/api/download/status/{task_id}")
 async def api_download_status(task_id: str):
-    info = get_status(task_id)
+    info = video_service.get_status(task_id)
     if not info:
         raise HTTPException(status_code=404, detail="任务不存在")
     response = {k: v for k, v in info.items() if k != "filepath"}
@@ -96,7 +123,7 @@ async def api_download_status(task_id: str):
 async def api_download_file(task_id: str):
     import os
 
-    filepath = get_filepath(task_id)
+    filepath = video_service.get_filepath(task_id)
     if not filepath or not os.path.exists(filepath):
         raise HTTPException(status_code=404, detail="文件不存在或未下载完成")
 
@@ -145,11 +172,11 @@ def _summarize_worker(task_id: str, url: str, subtitle_lang: str | None):
         ai_task_progress[task_id]["message"] = "正在提取字幕..."
 
         # 1. Extract video title
-        info = parse_video(url)
+        info = video_service.parse_video(url)
         title = info.get("title", "未知视频")
 
         # 2. Get subtitle text
-        subtitle_data = get_subtitle_data(url, subtitle_lang)
+        subtitle_data = subtitle_service.get_subtitle_data(url, subtitle_lang)
         transcript = "\n".join(item["text"] for item in subtitle_data) if subtitle_data else None
         if not transcript or not transcript.strip():
             ai_task_progress[task_id].update({
