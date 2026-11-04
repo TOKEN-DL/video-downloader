@@ -1,5 +1,6 @@
 import asyncio
 import io
+import os
 import uuid
 import threading
 import logging
@@ -12,6 +13,7 @@ import config
 from services import video_service
 from services import subtitle_service
 from services import history_service
+from services import thumb_service
 from services import ai_service
 import httpx
 
@@ -63,9 +65,32 @@ async def api_parse(req: ParseRequest):
             history_id = None
         if history_id is not None:
             result = {**result, "history_id": history_id}
+            # 封面缓存放后台线程：解析本身已经花了十几秒，不能再让下载拖住响应
+            _schedule_thumb_cache(history_id, result.get("thumbnail"))
         return result
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"解析失败: {str(e)}")
+
+
+def _schedule_thumb_cache(record_id: int, thumbnail_url: str) -> None:
+    """后台线程缓存封面，不阻塞 /api/parse 的响应。"""
+    if not thumbnail_url:
+        return
+    threading.Thread(
+        target=_thumb_worker,
+        args=(record_id, thumbnail_url),
+        daemon=True,
+    ).start()
+
+
+def _thumb_worker(record_id: int, thumbnail_url: str) -> None:
+    """封面缓存 worker：失败只记日志，解析结果早已返回，不受影响。"""
+    try:
+        rel_path = thumb_service.download_thumb(thumbnail_url, record_id)
+        if rel_path:
+            history_service.set_thumb_path(record_id, rel_path)
+    except Exception as e:
+        logger.error(f"封面缓存失败（record={record_id}）: {type(e).__name__}: {e}")
 
 
 @router.get("/api/history")
@@ -82,6 +107,33 @@ async def api_history_list(
         platform=platform,
         keyword=keyword,
     )
+
+
+@router.get("/api/history/thumb/{record_id}")
+async def api_history_thumb(record_id: int):
+    """本地缓存的封面。文件不存在返回 404，前端回退远程代理图。"""
+    path = thumb_service.thumb_abs_path(record_id)
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="封面不存在")
+    return FileResponse(
+        path,
+        media_type=thumb_service.guess_media_type(path),
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
+@router.delete("/api/history/{record_id}")
+async def api_history_delete(record_id: int):
+    """删除单条历史记录，连同它的本地封面文件。"""
+    if not history_service.delete_record(record_id):
+        raise HTTPException(status_code=404, detail="记录不存在")
+    return {"deleted": True}
+
+
+@router.delete("/api/history")
+async def api_history_clear():
+    """清空全部历史记录，连同所有本地封面文件。"""
+    return {"deleted": history_service.clear_records()}
 
 
 @router.post("/api/download")
@@ -121,8 +173,6 @@ async def api_download_status(task_id: str):
 
 @router.get("/api/download/file/{task_id}")
 async def api_download_file(task_id: str):
-    import os
-
     filepath = video_service.get_filepath(task_id)
     if not filepath or not os.path.exists(filepath):
         raise HTTPException(status_code=404, detail="文件不存在或未下载完成")

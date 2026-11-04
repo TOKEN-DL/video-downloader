@@ -15,6 +15,8 @@ backend/history.db
 # SQLite WAL 模式的伴生文件
 backend/history.db-wal
 backend/history.db-shm
+# 历史记录本地封面缓存
+backend/history/
 backend/logs/
 
 # Frontend
