@@ -4,14 +4,18 @@ import { useRoute, useRouter } from 'vue-router'
 import { useHistory } from '../composables/useHistory'
 import { useSummarize } from '../composables/useSummarize'
 import { useDownload } from '../composables/useDownload'
-import HistoryThumb from '../components/HistoryThumb.vue'
+import { HISTORY_STATUS } from '../constants/history'
+import AppNavbar from '../components/AppNavbar.vue'
+import HistoryCover from '../components/HistoryCover.vue'
 import AiSummaryPanel from '../components/AiSummaryPanel.vue'
-import { formatFileSize, formatDuration, getHistoryExportUrl, pickBestFormat } from '../api'
+import { formatFileSize, getHistoryExportUrl } from '../api'
 
 const route = useRoute()
 const router = useRouter()
 
-const { detail, detailLoading, error, loadDetail, startDownload, downloadError } = useHistory()
+const {
+  detail, detailLoading, error, actionError, loadDetail, remove, startDownload, downloadError,
+} = useHistory()
 const {
   status, progress, speed, downloaded, total, eta, fileUrl,
   isDone, isDownloading, isStarting, error: downloadTaskError,
@@ -27,7 +31,7 @@ const {
   load: loadSummary, chat,
 } = useSummarize()
 
-// 清晰度选择：默认选中分辨率最高的一档
+// 清晰度选择：默认选中分辨率最高的一档（由后端算好，前端不再自己挑一遍）
 const selectedFormat = ref('')
 const formats = computed(() => detail.value?.formats || [])
 
@@ -45,7 +49,7 @@ watch(formats, (list) => {
     return
   }
   if (!list.some(f => f.format_id === selectedFormat.value)) {
-    selectedFormat.value = pickBestFormat(list)
+    selectedFormat.value = detail.value?.default_format_id || ''
   }
 }, { immediate: true })
 
@@ -61,7 +65,7 @@ async function handleDownload() {
   preparing.value = true
   try {
     // 没选中就用记录里分辨率最高的一档
-    const formatId = selectedFormat.value || pickBestFormat(formats.value)
+    const formatId = selectedFormat.value || detail.value.default_format_id || ''
     const taskId = await startDownload(detail.value.id, formatId)
     if (taskId) {
       track(taskId)
@@ -77,6 +81,24 @@ function handleRetry() {
   router.push({ path: '/', query: { url: detail.value.url } })
 }
 
+// 删除本条记录：先二次确认，删成功回到列表页
+const confirmingDelete = ref(false)
+const deleting = ref(false)
+
+async function handleDelete() {
+  if (deleting.value || !detail.value) return
+  deleting.value = true
+  try {
+    const ok = await remove(detail.value.id)
+    if (ok) {
+      confirmingDelete.value = false
+      router.push('/history')
+    }
+  } finally {
+    deleting.value = false
+  }
+}
+
 onMounted(async () => {
   const record = await loadDetail(route.params.id)
   if (record) loadSummary(record)
@@ -87,25 +109,10 @@ onMounted(async () => {
   <div class="min-h-screen bg-white flex flex-col font-sans">
 
     <!-- ═══ Navbar ═══ -->
-    <nav class="sticky top-0 z-50 glass-card">
-      <div class="max-w-[1200px] mx-auto px-6 h-11 flex items-center justify-between">
-        <router-link to="/" class="flex items-center gap-2 group">
-          <div class="w-7 h-7 bg-[#0071e3] rounded-lg flex items-center justify-center
-                      group-hover:bg-[#0077ed] transition-colors">
-            <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round"
-                    d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
-            </svg>
-          </div>
-          <span class="font-semibold text-[#1d1d1f] text-sm tracking-tight">时雨视频分析</span>
-        </router-link>
-
-        <div class="flex items-center gap-7 text-xs text-[#86868b]">
-          <router-link to="/history" class="text-[#1d1d1f] font-medium">历史记录</router-link>
-          <router-link to="/" class="hover:text-[#1d1d1f] transition-colors">返回首页</router-link>
-        </div>
-      </div>
-    </nav>
+    <AppNavbar>
+      <router-link to="/history" class="text-[#1d1d1f] font-medium">历史记录</router-link>
+      <router-link to="/" class="hover:text-[#1d1d1f] transition-colors">返回首页</router-link>
+    </AppNavbar>
 
     <!-- ═══ Content ═══ -->
     <section class="flex-1 px-6 py-10 md:py-14">
@@ -150,27 +157,7 @@ onMounted(async () => {
           <!-- ── Left: Video Info Card ── -->
           <div class="lg:col-span-2 bg-white rounded-2xl border border-gray-100 shadow-lg overflow-hidden self-start">
             <!-- Cover -->
-            <div class="relative w-full aspect-video bg-gray-100 overflow-hidden">
-              <!-- 封面优先读本地缓存，取不到自动回退远程代理图 -->
-              <HistoryThumb v-if="detail.thumbnail || detail.thumb_path" :record="detail" alt="" class="w-full h-full object-cover" />
-              <div class="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent"></div>
-              <div v-if="detail.duration"
-                   class="absolute bottom-2 right-2 bg-black/70 text-white text-[10px] px-1.5 py-0.5 rounded-md backdrop-blur-sm">
-                {{ formatDuration(detail.duration) }}
-              </div>
-              <div v-if="detail.platform"
-                   class="absolute top-2 left-2 bg-black/50 text-white text-[9px] px-2 py-0.5 rounded-full font-medium uppercase tracking-wider backdrop-blur-sm">
-                {{ detail.platform }}
-              </div>
-              <div class="absolute bottom-0 left-0 right-0 p-3 md:p-4">
-                <h3 class="text-white font-semibold text-sm md:text-base leading-snug line-clamp-2 drop-shadow-md">
-                  {{ detail.title }}
-                </h3>
-                <p v-if="detail.author" class="text-white/70 text-[11px] md:text-xs mt-0.5 drop-shadow-sm">
-                  {{ detail.author }}
-                </p>
-              </div>
-            </div>
+            <HistoryCover :record="detail" />
 
             <!-- Quality Selector -->
             <div class="p-4">
@@ -268,7 +255,7 @@ onMounted(async () => {
           <div class="lg:col-span-3">
 
             <!-- AI 失败：记录保留，标出失败原因 -->
-            <div v-if="detail.status === 'ai_failed'"
+            <div v-if="detail.status === HISTORY_STATUS.AI_FAILED"
                  class="mb-3 rounded-2xl border border-orange-200 bg-orange-50 px-4 py-3 flex items-start gap-3">
               <svg class="w-4 h-4 mt-0.5 shrink-0 text-orange-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
@@ -281,7 +268,7 @@ onMounted(async () => {
             </div>
 
             <!-- 只解析过、还没跑 AI -->
-            <div v-else-if="detail.status === 'parsed'"
+            <div v-else-if="detail.status === HISTORY_STATUS.PARSED"
                  class="mb-3 rounded-2xl border border-gray-200 bg-[#f5f5f7] px-4 py-3">
               <p class="text-xs text-[#86868b]">AI 分析尚未完成。回到首页重新解析该链接，可再跑一次 AI 总结。</p>
             </div>
@@ -304,7 +291,7 @@ onMounted(async () => {
               @retry="handleRetry"
             />
 
-            <!-- 导出总结 -->
+            <!-- 导出总结 + 删除本条记录 -->
             <div class="mt-3 flex items-center gap-2">
               <a
                 :href="exportMarkdownUrl"
@@ -328,6 +315,42 @@ onMounted(async () => {
                 </svg>
                 导出 PDF
               </a>
+
+              <!-- 删除本条记录：二次确认，删成功回到列表页 -->
+              <div class="ml-auto flex items-center gap-2">
+                <p v-if="actionError" class="text-xs text-red-600">{{ actionError }}</p>
+                <button
+                  v-if="!confirmingDelete"
+                  @click="confirmingDelete = true"
+                  class="inline-flex items-center gap-1.5 px-3.5 py-2 bg-white border border-gray-200 rounded-xl text-xs
+                         font-medium text-[#86868b] hover:bg-red-50 hover:text-red-500 hover:border-red-200 active:scale-[0.98] transition-all"
+                >
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round"
+                          d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                  </svg>
+                  删除本条记录
+                </button>
+                <template v-else>
+                  <span class="text-xs text-[#86868b]">确认删除？</span>
+                  <button
+                    @click="handleDelete"
+                    :disabled="deleting"
+                    class="px-3.5 py-2 bg-red-500 text-white font-medium rounded-xl text-xs
+                           hover:bg-red-600 active:scale-[0.98] disabled:opacity-40 transition-all"
+                  >
+                    {{ deleting ? '删除中...' : '确认删除' }}
+                  </button>
+                  <button
+                    @click="confirmingDelete = false"
+                    :disabled="deleting"
+                    class="px-3.5 py-2 bg-[#f5f5f7] text-[#1d1d1f] font-medium rounded-xl text-xs
+                           hover:bg-[#e8e8ed] active:scale-[0.98] disabled:opacity-40 transition-all"
+                  >
+                    取消
+                  </button>
+                </template>
+              </div>
             </div>
           </div>
         </div>

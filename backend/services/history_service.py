@@ -7,11 +7,17 @@
 """
 import json
 import logging
+import re
 from datetime import datetime
 
 import config
 from database import db
-from database.models import HISTORY_LIST_COLUMNS
+from database.models import (
+    HISTORY_LIST_COLUMNS,
+    STATUS_AI_DONE,
+    STATUS_AI_FAILED,
+    STATUS_PARSED,
+)
 from services import thumb_service
 
 logger = logging.getLogger("history_service")
@@ -22,6 +28,46 @@ MAX_PAGE_SIZE = 100
 
 def _now() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+_RESOLUTION_RE = re.compile(r"(\d+)")
+
+
+def _resolution_height(resolution) -> int | None:
+    """把分辨率标签解析成像素高度；解析不出来（如抖音的 'best'）返回 None。"""
+    text = str(resolution or "").strip().lower()
+    if not text:
+        return None
+    if "x" in text:  # 1920x1080 → 取高度那一半
+        text = text.rsplit("x", 1)[-1]
+    m = _RESOLUTION_RE.search(text)
+    return int(m.group(1)) if m else None
+
+
+def pick_best_format(formats: list) -> str:
+    """挑分辨率最高的一档；分辨率没法比较（如抖音的 'best'）时取第一档。
+
+    详情页的默认清晰度与「不指定清晰度」的重新下载都用它，
+    前端直接消费后端算好的结果，不再各写一套挑选逻辑。
+    """
+    best_id = ""
+    best_height = -1
+    for fmt in formats or []:
+        if not isinstance(fmt, dict):
+            continue
+        format_id = str(fmt.get("format_id") or "").strip()
+        if not format_id:
+            continue
+        height = _resolution_height(fmt.get("resolution"))
+        if height is None:
+            # 高度不可比：先占个位，遇到可比的就让位
+            if not best_id:
+                best_id = format_id
+            continue
+        if height > best_height:
+            best_height = height
+            best_id = format_id
+    return best_id
 
 
 def upsert_parsed(url: str, video_info: dict, subtitle_lang: str | None = None) -> int:
@@ -36,12 +82,12 @@ def upsert_parsed(url: str, video_info: dict, subtitle_lang: str | None = None) 
     formats_json = json.dumps(video_info.get("formats") or [], ensure_ascii=False)
 
     conn.execute(
-        """
+        f"""
         INSERT INTO history (
             url, title, author, platform, thumbnail, duration,
             formats_json, subtitle_lang, status, created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'parsed', ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, '{STATUS_PARSED}', ?, ?)
         ON CONFLICT(url) DO UPDATE SET
             title         = excluded.title,
             author        = excluded.author,
@@ -93,7 +139,10 @@ def get_record(record_id: int) -> dict | None:
     record["subtitle_data"] = _loads(record.pop("subtitle_json"), [])
     record["ai_result"] = _loads(record.pop("ai_result"), None)
     record["mindmap_markdown"] = record.pop("mindmap_md") or ""
-    record["has_ai"] = record["status"] == "ai_done"
+    record["has_ai"] = record["status"] == STATUS_AI_DONE
+    # 默认清晰度：记录里分辨率最高的一档。详情页与「不指定清晰度」的下载都用它，
+    # 前端不必再自己实现一遍挑选逻辑。
+    record["default_format_id"] = pick_best_format(record.get("formats") or [])
     return record
 
 
@@ -138,7 +187,7 @@ def list_records(
     items = []
     for row in rows:
         item = {key: row[key] for key in HISTORY_LIST_COLUMNS}
-        item["has_ai"] = item["status"] == "ai_done"
+        item["has_ai"] = item["status"] == STATUS_AI_DONE
         items.append(item)
 
     return {"total": total, "page": page, "page_size": size, "items": items}
@@ -158,13 +207,13 @@ def attach_ai_result(
     """
     conn = db.get_conn()
     cursor = conn.execute(
-        """
+        f"""
         UPDATE history SET
             subtitle_json = ?,
             transcript    = ?,
             ai_result     = ?,
             mindmap_md    = ?,
-            status        = 'ai_done',
+            status        = '{STATUS_AI_DONE}',
             error         = NULL,
             updated_at    = ?
         WHERE id = ?
@@ -190,7 +239,7 @@ def mark_ai_failed(record_id: int, error: str) -> bool:
     """
     conn = db.get_conn()
     cursor = conn.execute(
-        "UPDATE history SET status = 'ai_failed', error = ?, updated_at = ? WHERE id = ?",
+        f"UPDATE history SET status = '{STATUS_AI_FAILED}', error = ?, updated_at = ? WHERE id = ?",
         (error, _now(), record_id),
     )
     conn.commit()
@@ -221,19 +270,6 @@ def set_thumb_path(record_id: int, thumb_path: str) -> bool:
     )
     conn.commit()
     return True
-
-
-def delete_thumb(record_id: int) -> bool:
-    """删除单条记录的本地封面文件。
-
-    与记录删除解耦，供删除流程直接调用；记录本身已不存在时也照删文件。
-    """
-    conn = db.get_conn()
-    row = conn.execute(
-        "SELECT thumb_path FROM history WHERE id = ?", (record_id,)
-    ).fetchone()
-    stored = row["thumb_path"] if row else None
-    return thumb_service.delete_thumb(record_id, stored)
 
 
 def clear_thumbs() -> int:

@@ -15,6 +15,9 @@ export function useHistory() {
   const detailLoading = ref(false)
   // 下载失败单独放：error 是列表 / 详情的加载错误，两者不能混
   const downloadError = ref('')
+  // 删除 / 清空失败也单独放：详情页里加载错误会让整页变成错误页，
+  // 删除失败不该把正在看的记录也一起顶掉
+  const actionError = ref('')
 
   const hasMore = computed(() => items.value.length < total.value)
 
@@ -70,14 +73,14 @@ export function useHistory() {
 
   // 删除单条：后端删成功后本地列表同步去掉这一条
   async function remove(id) {
-    error.value = ''
+    actionError.value = ''
     try {
       await deleteHistory(id)
       items.value = items.value.filter(item => item.id !== id)
       total.value = Math.max(0, total.value - 1)
       return true
     } catch (e) {
-      error.value = e.message
+      actionError.value = e.message
       return false
     }
   }
@@ -97,21 +100,21 @@ export function useHistory() {
 
   // 清空全部
   async function clearAll() {
-    error.value = ''
+    actionError.value = ''
     try {
       await clearHistory()
       items.value = []
       total.value = 0
       return true
     } catch (e) {
-      error.value = e.message
+      actionError.value = e.message
       return false
     }
   }
 
   return {
     items, total, page, hasMore,
-    loading, loadingMore, error,
+    loading, loadingMore, error, actionError,
     detail, detailLoading, downloadError,
     load, loadMore, loadDetail, remove, clearAll, startDownload,
   }

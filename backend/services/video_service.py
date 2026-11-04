@@ -152,6 +152,11 @@ def resolve_download_source(url: str, format_id: str) -> tuple[str, str | None]:
 
     第 2 步是关键：服务重启后内存缓存是空的，重新解析能拿到新的签名直链，
     「重启后抖音下载必然失败」这个缺陷因此消失。首页下载与历史记录下载共用它。
+
+    已知取舍：走 yt-dlp 分支时，这里的解析结果会被丢弃 —— start_download 里
+    yt-dlp 会自己再提取一次（缓存未命中时多花 10~25 秒）。留着这个重复是为了
+    不去动 yt-dlp 的下载内部流程（process_ie_result 之类的内部接口版本不稳），
+    换取直链 / yt-dlp 两条分支的行为稳定。
     """
     cached = _cached_parse_result(url)
     if cached and cached.get("_fallback"):

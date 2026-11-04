@@ -148,7 +148,9 @@ def test_thumbnail_download_does_not_block_parse_response(
         resp = client.post("/api/parse", json={"url": "https://www.bilibili.com/video/BV1xx"})
 
         assert resp.status_code == 200
-        assert started.is_set(), "封面应在后台线程下载"
+        # 后台线程还没被调度到是正常的：等它真的开始下载再断言，
+        # 否则这条断言测的是线程调度时机而不是「解析不等封面」。
+        assert _wait_until(lambda: started.is_set()), "封面应在后台线程下载"
         assert not finished.is_set(), "解析响应不该等封面下载完成"
     finally:
         release.set()

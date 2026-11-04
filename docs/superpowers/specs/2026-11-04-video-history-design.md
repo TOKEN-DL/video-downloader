@@ -54,7 +54,7 @@
 | 存储的 AI 数据 | 总结结果 + 思维导图 + 字幕全文 | 存了字幕才能在历史页继续 AI 问答 |
 | 存储方案 | 单表 SQLite + JSON 列 | 零新依赖；URL 唯一索引天然去重；查询简单 |
 | 页面形态 | 独立路由页 `/history` | 与 `docs/方案设计文档.md` 规划一致；列表不挤占首页 |
-| 同 URL 重复解析 | 更新原记录（不新增行） | 列表不出现重复条目；AI 数据刷新为最新 |
+| 同 URL 重复解析 | 更新原记录（不新增行） | 列表不出现重复条目；**保留已有的 AI 数据与状态**（同一 URL 一般就是同一个视频，旧的分析结果依然成立，不因重新解析作废） |
 | 自动化测试 | 引入 pytest | 后端 CRUD/去重/分页是纯逻辑，值得回归保护 |
 
 ---
@@ -121,6 +121,7 @@ CREATE INDEX IF NOT EXISTS idx_history_status     ON history (status);
 | `delete_record(record_id)` | 删除单条并清理本地封面 |
 | `clear_records()` | 清空全部并清理本地封面 |
 | `get_record_by_url(url)` | 按 url 取最近一条（`history_id` 缺失时的兜底） |
+| `pick_best_format(formats)` | 挑分辨率最高的一档（详情页默认清晰度 / 不指定清晰度时的下载都用它） |
 
 所有对外方法返回普通 `dict` / `list`（JSON 字段在服务层反序列化），路由层不接触 JSON 编解码细节。
 
@@ -151,6 +152,7 @@ CREATE INDEX IF NOT EXISTS idx_history_status     ON history (status);
   "thumbnail": "https://...",
   "thumb_path": "thumbs/12.jpg",
   "status": "ai_done",
+  "error": null,
   "has_ai": true,
   "created_at": "2026-11-04 10:30:00",
   "updated_at": "2026-11-04 10:31:12"
@@ -158,8 +160,10 @@ CREATE INDEX IF NOT EXISTS idx_history_status     ON history (status);
 ```
 
 其中 `has_ai` 等价于 `status === 'ai_done'`，前端据此决定是否显示「AI 已总结」徽标。
+`error` 是 AI 失败的原因（成功时为空），列表页 hover「AI 失败」徽标时显示它，
+让用户能区分「没字幕」和「模型报错」。
 
-详情额外字段：`formats`（数组）、`subtitle_data`（数组）、`transcript`（字符串）、`ai_result`（对象）、`mindmap_markdown`（字符串）、`url`、`error`。
+详情额外字段：`formats`（数组）、`subtitle_data`（数组）、`transcript`（字符串）、`ai_result`（对象）、`mindmap_markdown`（字符串）、`url`、`error`、`default_format_id`（该记录可用格式中分辨率最高的一档，前端直接用作默认清晰度）。
 
 ### 4.2 改造的现有端点
 
