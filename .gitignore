@@ -12,6 +12,11 @@ venv/
 backend/downloads/
 backend/subtitles/
 backend/history.db
+# SQLite WAL 模式的伴生文件
+backend/history.db-wal
+backend/history.db-shm
+# 历史记录本地封面缓存（运行期产物）
+backend/history/
 backend/logs/
 
 # Frontend
@@ -34,3 +39,6 @@ Thumbs.db
 
 # Env
 .env
+
+# Git worktrees (implement-spec 多票并行开发用)
+.worktrees/

@@ -1,0 +1,361 @@
+<script setup>
+import { ref, computed, onMounted, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { useHistory } from '../composables/useHistory'
+import { useSummarize } from '../composables/useSummarize'
+import { useDownload } from '../composables/useDownload'
+import { HISTORY_STATUS } from '../constants/history'
+import AppNavbar from '../components/AppNavbar.vue'
+import HistoryCover from '../components/HistoryCover.vue'
+import AiSummaryPanel from '../components/AiSummaryPanel.vue'
+import { formatFileSize, getHistoryExportUrl } from '../api'
+
+const route = useRoute()
+const router = useRouter()
+
+const {
+  detail, detailLoading, error, actionError, loadDetail, remove, startDownload, downloadError,
+} = useHistory()
+const {
+  status, progress, speed, downloaded, total, eta, fileUrl,
+  isDone, isDownloading, isStarting, error: downloadTaskError,
+  track,
+} = useDownload()
+
+// AI 面板的数据来自库里那条记录，不是当场再跑一次 AI
+const {
+  summarizeLoading, summarizeError, summaryResult,
+  summarizeStatus, summarizeMessage,
+  transcriptText, subtitleData, mindmapMarkdown,
+  chatMessages, chatLoading, chatError, chatHint,
+  load: loadSummary, chat,
+} = useSummarize()
+
+// 清晰度选择：默认选中分辨率最高的一档（由后端算好，前端不再自己挑一遍）
+const selectedFormat = ref('')
+const formats = computed(() => detail.value?.formats || [])
+
+// 导出：历史记录没有内存里的 task_id，走按记录的导出接口
+const exportMarkdownUrl = computed(() =>
+  detail.value ? getHistoryExportUrl(detail.value.id, 'markdown') : ''
+)
+const exportPdfUrl = computed(() =>
+  detail.value ? getHistoryExportUrl(detail.value.id, 'pdf') : ''
+)
+
+watch(formats, (list) => {
+  if (!list.length) {
+    selectedFormat.value = ''
+    return
+  }
+  if (!list.some(f => f.format_id === selectedFormat.value)) {
+    selectedFormat.value = detail.value?.default_format_id || ''
+  }
+}, { immediate: true })
+
+// 启动下载要重新解析一次（抖音要重新拿签名直链），可能要十几秒
+const preparing = ref(false)
+const isPreparing = computed(() => preparing.value || isStarting.value)
+
+// 启动失败（视频源失效等）与下载过程出错都算下载失败
+const downloadErrorMessage = computed(() => downloadError.value || downloadTaskError.value)
+
+async function handleDownload() {
+  if (isPreparing.value || !detail.value) return
+  preparing.value = true
+  try {
+    // 没选中就用记录里分辨率最高的一档
+    const formatId = selectedFormat.value || detail.value.default_format_id || ''
+    const taskId = await startDownload(detail.value.id, formatId)
+    if (taskId) {
+      track(taskId)
+    }
+  } finally {
+    preparing.value = false
+  }
+}
+
+// AI 失败后想重来：带着原链接回首页重新解析
+function handleRetry() {
+  if (!detail.value?.url) return
+  router.push({ path: '/', query: { url: detail.value.url } })
+}
+
+// 删除本条记录：先二次确认，删成功回到列表页
+const confirmingDelete = ref(false)
+const deleting = ref(false)
+
+async function handleDelete() {
+  if (deleting.value || !detail.value) return
+  deleting.value = true
+  try {
+    const ok = await remove(detail.value.id)
+    if (ok) {
+      confirmingDelete.value = false
+      router.push('/history')
+    }
+  } finally {
+    deleting.value = false
+  }
+}
+
+onMounted(async () => {
+  const record = await loadDetail(route.params.id)
+  if (record) loadSummary(record)
+})
+</script>
+
+<template>
+  <div class="min-h-screen bg-white flex flex-col font-sans">
+
+    <!-- ═══ Navbar ═══ -->
+    <AppNavbar>
+      <router-link to="/history" class="text-[#1d1d1f] font-medium">历史记录</router-link>
+      <router-link to="/" class="hover:text-[#1d1d1f] transition-colors">返回首页</router-link>
+    </AppNavbar>
+
+    <!-- ═══ Content ═══ -->
+    <section class="flex-1 px-6 py-10 md:py-14">
+      <div class="max-w-[1200px] mx-auto">
+
+        <!-- Back -->
+        <router-link
+          to="/history"
+          class="inline-flex items-center gap-1.5 text-xs text-[#86868b] hover:text-[#1d1d1f] transition-colors mb-6"
+        >
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/>
+          </svg>
+          返回历史记录
+        </router-link>
+
+        <!-- Loading -->
+        <div v-if="detailLoading" class="py-20 text-center text-sm text-[#86868b]">
+          正在加载记录...
+        </div>
+
+        <!-- Error -->
+        <div v-else-if="error" class="py-20 text-center animate-fade-in-up">
+          <div class="w-14 h-14 mx-auto mb-5 bg-red-50 rounded-2xl flex items-center justify-center">
+            <svg class="w-7 h-7 text-red-500" fill="currentColor" viewBox="0 0 20 20">
+              <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/>
+            </svg>
+          </div>
+          <h2 class="text-[#1d1d1f] text-lg font-semibold mb-2">{{ error }}</h2>
+          <router-link
+            to="/history"
+            class="inline-flex items-center gap-2 px-6 py-3 bg-[#0071e3] text-white font-semibold rounded-xl
+                   hover:bg-[#0077ed] active:scale-[0.98] transition-all text-sm shadow-sm"
+          >
+            返回历史记录
+          </router-link>
+        </div>
+
+        <!-- Record -->
+        <div v-else-if="detail" class="grid grid-cols-1 lg:grid-cols-5 gap-5">
+
+          <!-- ── Left: Video Info Card ── -->
+          <div class="lg:col-span-2 bg-white rounded-2xl border border-gray-100 shadow-lg overflow-hidden self-start">
+            <!-- Cover -->
+            <HistoryCover :record="detail" />
+
+            <!-- Quality Selector -->
+            <div class="p-4">
+              <label class="text-[10px] font-medium text-[#86868b] uppercase tracking-wider mb-2 block">选择清晰度</label>
+              <div v-if="formats.length" class="grid grid-cols-2 gap-1.5">
+                <button
+                  v-for="fmt in formats"
+                  :key="fmt.format_id"
+                  @click="selectedFormat = fmt.format_id"
+                  :class="[
+                    'px-2.5 py-2.5 rounded-xl text-xs font-medium transition-all text-center',
+                    selectedFormat === fmt.format_id
+                      ? 'bg-[#0071e3] text-white shadow-sm shadow-blue-200'
+                      : 'bg-[#f5f5f7] text-[#1d1d1f] hover:bg-[#e8e8ed] active:scale-[0.97]'
+                  ]"
+                >
+                  <div>{{ fmt.resolution }}</div>
+                  <div v-if="fmt.filesize" class="text-[9px] mt-0.5 opacity-60">
+                    {{ formatFileSize(fmt.filesize) }}
+                  </div>
+                </button>
+              </div>
+              <p v-else class="text-xs text-[#86868b] py-2">这条记录没有可用的清晰度信息。</p>
+            </div>
+
+            <!-- Download Action -->
+            <div class="px-4 pb-4">
+              <div v-if="!isDone && !isDownloading">
+                <button
+                  @click="handleDownload"
+                  :disabled="!formats.length || isPreparing"
+                  class="w-full py-3.5 bg-[#0071e3] text-white font-semibold rounded-xl text-sm
+                         hover:bg-[#0077ed] active:bg-[#0071e3] active:scale-[0.99]
+                         disabled:opacity-30 disabled:cursor-not-allowed
+                         transition-all shadow-sm"
+                >
+                  {{ isPreparing ? '正在准备下载...' : '开始下载' }}
+                </button>
+              </div>
+
+              <!-- Progress -->
+              <div v-if="isDownloading" class="space-y-3">
+                <div class="relative h-1.5 bg-[#f5f5f7] rounded-full overflow-hidden">
+                  <div
+                    class="absolute inset-y-0 left-0 bg-[#0071e3] rounded-full transition-all duration-700 ease-out progress-glow"
+                    :style="{ width: `${progress}%` }"
+                  />
+                </div>
+                <div class="flex justify-between items-center text-xs">
+                  <span class="text-[#1d1d1f] font-semibold tabular-nums">{{ progress }}%</span>
+                  <div class="flex items-center gap-2 text-[#86868b] text-[10px]">
+                    <span v-if="speed">{{ speed }}</span>
+                    <span v-if="total">{{ formatFileSize(downloaded) }} / {{ formatFileSize(total) }}</span>
+                    <span v-if="eta">剩余 {{ eta }}s</span>
+                  </div>
+                </div>
+                <p class="text-center text-xs text-[#86868b] flex items-center justify-center gap-1.5">
+                  <svg v-if="status === 'merging'" class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                  </svg>
+                  {{ status === 'merging' ? '正在合并音视频...' : '下载中...' }}
+                </p>
+              </div>
+
+              <!-- Done -->
+              <div v-if="isDone" class="text-center space-y-3">
+                <div class="w-10 h-10 mx-auto bg-green-50 rounded-full flex items-center justify-center">
+                  <svg class="w-5 h-5 text-green-500" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
+                  </svg>
+                </div>
+                <a
+                  :href="fileUrl"
+                  download
+                  class="inline-flex items-center gap-2 px-6 py-3 bg-[#0071e3] text-white font-semibold rounded-xl
+                         hover:bg-[#0077ed] active:scale-[0.98] transition-all text-sm shadow-sm"
+                >
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round"
+                          d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+                  </svg>
+                  保存到本地
+                </a>
+              </div>
+
+              <!-- Error -->
+              <p v-if="downloadErrorMessage" class="mt-3 text-xs text-red-600 text-center leading-relaxed">
+                下载失败：{{ downloadErrorMessage }}
+              </p>
+            </div>
+          </div>
+
+          <!-- ── Right: AI Panel ── -->
+          <div class="lg:col-span-3">
+
+            <!-- AI 失败：记录保留，标出失败原因 -->
+            <div v-if="detail.status === HISTORY_STATUS.AI_FAILED"
+                 class="mb-3 rounded-2xl border border-orange-200 bg-orange-50 px-4 py-3 flex items-start gap-3">
+              <svg class="w-4 h-4 mt-0.5 shrink-0 text-orange-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+              </svg>
+              <div class="flex-1 min-w-0">
+                <p class="text-xs font-semibold text-orange-700">AI 总结失败</p>
+                <p class="text-xs text-orange-600 mt-0.5 break-words">{{ detail.error || '未知原因' }}</p>
+                <p class="text-[11px] text-orange-500 mt-1">视频信息已保留，可回到首页重新解析该链接再试一次。</p>
+              </div>
+            </div>
+
+            <!-- 只解析过、还没跑 AI -->
+            <div v-else-if="detail.status === HISTORY_STATUS.PARSED"
+                 class="mb-3 rounded-2xl border border-gray-200 bg-[#f5f5f7] px-4 py-3">
+              <p class="text-xs text-[#86868b]">AI 分析尚未完成。回到首页重新解析该链接，可再跑一次 AI 总结。</p>
+            </div>
+
+            <!-- AI 面板：总结 / 字幕 / 思维导图 / AI 问答 -->
+            <AiSummaryPanel
+              :loading="summarizeLoading"
+              :error="summarizeError"
+              :result="summaryResult"
+              :status="summarizeStatus"
+              :message="summarizeMessage"
+              :transcript="transcriptText"
+              :subtitle-data="subtitleData"
+              :mindmap-markdown="mindmapMarkdown"
+              :chat-messages="chatMessages"
+              :chat-loading="chatLoading"
+              :chat-error="chatError"
+              :chat-hint="chatHint"
+              @chat="chat"
+              @retry="handleRetry"
+            />
+
+            <!-- 导出总结 + 删除本条记录 -->
+            <div class="mt-3 flex items-center gap-2">
+              <a
+                :href="exportMarkdownUrl"
+                download
+                class="inline-flex items-center gap-1.5 px-3.5 py-2 bg-white border border-gray-200 rounded-xl text-xs
+                       font-medium text-[#1d1d1f] hover:bg-[#f5f5f7] active:scale-[0.98] transition-all"
+              >
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+                </svg>
+                导出 Markdown
+              </a>
+              <a
+                :href="exportPdfUrl"
+                download
+                class="inline-flex items-center gap-1.5 px-3.5 py-2 bg-white border border-gray-200 rounded-xl text-xs
+                       font-medium text-[#1d1d1f] hover:bg-[#f5f5f7] active:scale-[0.98] transition-all"
+              >
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+                </svg>
+                导出 PDF
+              </a>
+
+              <!-- 删除本条记录：二次确认，删成功回到列表页 -->
+              <div class="ml-auto flex items-center gap-2">
+                <p v-if="actionError" class="text-xs text-red-600">{{ actionError }}</p>
+                <button
+                  v-if="!confirmingDelete"
+                  @click="confirmingDelete = true"
+                  class="inline-flex items-center gap-1.5 px-3.5 py-2 bg-white border border-gray-200 rounded-xl text-xs
+                         font-medium text-[#86868b] hover:bg-red-50 hover:text-red-500 hover:border-red-200 active:scale-[0.98] transition-all"
+                >
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round"
+                          d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                  </svg>
+                  删除本条记录
+                </button>
+                <template v-else>
+                  <span class="text-xs text-[#86868b]">确认删除？</span>
+                  <button
+                    @click="handleDelete"
+                    :disabled="deleting"
+                    class="px-3.5 py-2 bg-red-500 text-white font-medium rounded-xl text-xs
+                           hover:bg-red-600 active:scale-[0.98] disabled:opacity-40 transition-all"
+                  >
+                    {{ deleting ? '删除中...' : '确认删除' }}
+                  </button>
+                  <button
+                    @click="confirmingDelete = false"
+                    :disabled="deleting"
+                    class="px-3.5 py-2 bg-[#f5f5f7] text-[#1d1d1f] font-medium rounded-xl text-xs
+                           hover:bg-[#e8e8ed] active:scale-[0.98] disabled:opacity-40 transition-all"
+                  >
+                    取消
+                  </button>
+                </template>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+  </div>
+</template>

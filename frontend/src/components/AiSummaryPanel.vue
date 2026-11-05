@@ -27,6 +27,10 @@
         <div v-if="summaryHtml" class="flex-1 overflow-y-auto max-h-[600px] pr-1">
           <div class="summary-prose prose prose-slate prose-sm max-w-none" v-html="summaryHtml"></div>
         </div>
+        <!-- 还没有总结时的说明（如历史记录里 AI 尚未跑完） -->
+        <div v-else-if="!loading && !error" class="flex flex-col items-center justify-center py-16 text-[#86868b]">
+          <p class="text-sm">{{ statusMessage }}</p>
+        </div>
         <div v-if="loading && summaryHtml" class="mt-2 inline-flex items-center gap-1.5 text-xs text-[#86868b]">
           <span class="w-1.5 h-1.5 bg-[#0071e3] rounded-full animate-pulse"></span>
           AI 正在生成中...
@@ -102,8 +106,14 @@
           <!-- 消息列表 -->
           <div ref="chatContainer" class="flex-1 overflow-y-auto space-y-4 pr-1">
             <div v-if="chatMessages.length === 0" class="flex flex-col items-center justify-center py-12 text-[#86868b]">
-              <p class="text-sm mb-1">向 AI 提问关于这个视频的任何问题</p>
-              <p class="text-xs">例如："这个视频的核心观点是什么？"</p>
+              <template v-if="!hasChatContext">
+                <p class="text-sm mb-1">{{ chatHint || '还没有可用的字幕，暂时无法进行 AI 问答' }}</p>
+                <p class="text-xs">字幕是提问的上下文，AI 分析完成后再来提问</p>
+              </template>
+              <template v-else>
+                <p class="text-sm mb-1">向 AI 提问关于这个视频的任何问题</p>
+                <p class="text-xs">例如："这个视频的核心观点是什么？"</p>
+              </template>
             </div>
             <div
               v-for="(msg, idx) in chatMessages"
@@ -124,6 +134,11 @@
               </div>
             </div>
           </div>
+          <!-- 对话错误：显示在对话区域，不塞一条假回答冒充 AI 回复 -->
+          <div v-if="chatError"
+               class="mt-2 px-3 py-2 rounded-xl bg-red-50 border border-red-100 text-xs text-red-600 leading-relaxed">
+            {{ chatError }}
+          </div>
           <!-- 输入区域 -->
           <div class="flex gap-2 pt-3 border-t border-gray-100 mt-2">
             <input
@@ -132,11 +147,11 @@
               type="text"
               placeholder="输入你的问题..."
               class="flex-1 h-11 px-4 rounded-xl border border-gray-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-[#0071e3]/20 focus:border-[#0071e3] transition-all"
-              :disabled="chatLoading"
+              :disabled="chatLoading || !hasChatContext"
             />
             <button
               @click="sendChat"
-              :disabled="!chatInput.trim() || chatLoading"
+              :disabled="!chatInput.trim() || chatLoading || !hasChatContext"
               class="h-11 px-5 rounded-xl bg-[#0071e3] text-white text-sm font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer hover:bg-[#0077ed]"
             >
               发送
@@ -172,6 +187,8 @@ const props = defineProps({
   mindmapMarkdown: String,
   chatMessages: Array,
   chatLoading: Boolean,
+  chatError: { type: String, default: '' },
+  chatHint: { type: String, default: '' },
 })
 const emit = defineEmits(['chat', 'retry'])
 
@@ -223,6 +240,9 @@ const transcriptLines = computed(() => {
   if (!props.transcript) return []
   return props.transcript.split('\n').filter(l => l.trim())
 })
+
+// 提问的前提是字幕：没有字幕上下文时不给发请求，只给提示
+const hasChatContext = computed(() => !!(props.transcript || '').trim())
 
 function renderMd(text) {
   if (!text) return ''

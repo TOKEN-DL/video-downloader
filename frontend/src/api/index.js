@@ -69,11 +69,16 @@ export function formatDuration(seconds) {
 
 // ============ AI Summarization ============
 
-export async function startSummarize(url, subtitleLang) {
+export async function startSummarize(url, subtitleLang, historyId) {
   const res = await fetch(`${BASE}/api/ai/summarize`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url, subtitle_lang: subtitleLang || null }),
+    // history_id 带上后，AI 结果直接回写这条历史记录；缺省时后端按 url 兜底匹配
+    body: JSON.stringify({
+      url,
+      subtitle_lang: subtitleLang || null,
+      history_id: historyId ?? null,
+    }),
   })
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
@@ -95,7 +100,9 @@ export async function sendChatMessage(messages, transcriptContext) {
   const res = await fetch(`${BASE}/api/ai/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url: '', messages, transcript_context: transcriptContext }),
+    // 对话的上下文只有字幕：历史记录没有可靠的链接上下文（可能是短链），
+    // 后端也不依赖 url，所以这里不传。
+    body: JSON.stringify({ messages, transcript_context: transcriptContext }),
   })
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
@@ -106,4 +113,67 @@ export async function sendChatMessage(messages, transcriptContext) {
 
 export function getExportUrl(taskId, format) {
   return `${BASE}/api/ai/export/${taskId}?format=${format}`
+}
+
+// ============ 历史记录 ============
+
+export async function listHistory(page = 1, pageSize = 20) {
+  const query = new URLSearchParams({ page, page_size: pageSize })
+  const res = await fetch(`${BASE}/api/history?${query}`)
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(_extractDetail(err) || '获取历史记录失败')
+  }
+  return res.json()
+}
+
+export async function getHistory(id) {
+  const res = await fetch(`${BASE}/api/history/${id}`)
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(_extractDetail(err) || '获取记录详情失败')
+  }
+  return res.json()
+}
+
+export async function deleteHistory(id) {
+  const res = await fetch(`${BASE}/api/history/${id}`, { method: 'DELETE' })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(_extractDetail(err) || '删除记录失败')
+  }
+  return res.json()
+}
+
+export async function clearHistory() {
+  const res = await fetch(`${BASE}/api/history`, { method: 'DELETE' })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(_extractDetail(err) || '清空历史记录失败')
+  }
+  return res.json()
+}
+
+// 本地缓存的封面（封面 URL 带签名会过期，历史页优先读本地这张）
+export function getHistoryThumbUrl(recordId) {
+  return `${BASE}/api/history/thumb/${recordId}`
+}
+
+// 历史记录里的 AI 总结导出（历史记录没有内存里的 task_id，走按记录的导出接口）
+export function getHistoryExportUrl(recordId, format) {
+  return `${BASE}/api/history/${recordId}/export?format=${format}`
+}
+
+// 从历史记录重新下载：服务端会用记录里的链接与清晰度重新走网络下载
+export async function downloadHistory(id, formatId) {
+  const res = await fetch(`${BASE}/api/history/${id}/download`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ format_id: formatId || null }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(_extractDetail(err) || '启动下载失败')
+  }
+  return res.json()
 }
